@@ -1,12 +1,19 @@
 {
     "name": "cucumber-test-runner",
-    "displayName": "Cucumber Test Runner",
+    "displayName": "CucumberJS Test Runner",
     "description": "Allow to discover, run and debug cucumber-js tests",
     "version": "0.1.0",
+    "publisher": "balrog994",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/Balrog994/cucumber-test-runner"
+    },
     "engines": {
         "vscode": "^1.68.0"
     },
     "categories": [
+        "Debuggers",
+        "Testing",
         "Other"
     ],
     "activationEvents": [
@@ -14,12 +21,7 @@
     ],
     "main": "./out/extension.js",
     "contributes": {
-        "commands": [
-            {
-                "command": "cucumber-test-runner.helloWorld",
-                "title": "Hello World"
-            }
-        ]
+        "commands": []
     },
     "scripts": {
         "vscode:prepublish": "npm run compile",
