@@ -3,6 +3,10 @@
     "displayName": "Cucumber Test Runner",
     "description": "Allow to discover, run and debug cucumber-js tests",
     "version": "0.1.0",
+    "enabledApiProposals": [
+        "testCoverage",
+        "testContinuousRun"
+    ],
     "engines": {
         "vscode": "^1.68.0"
     },

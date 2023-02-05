@@ -22,34 +22,34 @@ export function activate(context: vscode.ExtensionContext) {
 
     const fileChangedEmitter = new vscode.EventEmitter<vscode.Uri>();
     const runHandler = (
-        request: vscode.TestRunRequest2,
+        request: vscode.TestRunRequest,
         cancellation: vscode.CancellationToken
     ) => {
-        if (!request.continuous) {
-            return startTestRun(request);
-        }
+        //if (!request.continuous) {
+        return startTestRun(request);
+        //}
 
-        const l = fileChangedEmitter.event((uri) =>
+        /*const l = fileChangedEmitter.event((uri) =>
             startTestRun(
-                new vscode.TestRunRequest2(
+                new vscode.TestRunRequest(
                     [getOrCreateFile(ctrl, uri).file],
                     undefined,
-                    request.profile,
-                    true
+                    request.profile
+                    //true
                 )
             )
         );
-        cancellation.onCancellationRequested(() => l.dispose());
+        cancellation.onCancellationRequested(() => l.dispose());*/
     };
 
     const startTestRun = (request: vscode.TestRunRequest) => {
         const queue: { test: vscode.TestItem; data: TestCase }[] = [];
         const run = ctrl.createTestRun(request);
         // map of file uris to statements on each line:
-        const coveredLines = new Map<
-            /* file uri */ string,
+        /*const coveredLines = new Map<
+            string, // file uri
             (vscode.StatementCoverage | undefined)[]
-        >();
+        >();*/
 
         const discoverTests = async (tests: Iterable<vscode.TestItem>) => {
             for (const test of tests) {
@@ -69,7 +69,7 @@ export function activate(context: vscode.ExtensionContext) {
                     await discoverTests(gatherTestItems(test.children));
                 }
 
-                if (test.uri && !coveredLines.has(test.uri.toString())) {
+                /*if (test.uri && !coveredLines.has(test.uri.toString())) {
                     try {
                         const lines = (
                             await getContentFromFilesystem(test.uri)
@@ -88,7 +88,7 @@ export function activate(context: vscode.ExtensionContext) {
                     } catch {
                         // ignored
                     }
-                }
+                }*/
             }
         };
 
@@ -102,11 +102,11 @@ export function activate(context: vscode.ExtensionContext) {
                     await data.run(test, run);
                 }
 
-                const lineNo = test.range!.start.line;
+                /*const lineNo = test.range!.start.line;
                 const fileCoverage = coveredLines.get(test.uri!.toString());
                 if (fileCoverage) {
                     fileCoverage[lineNo]!.executionCount++;
-                }
+                }*/
 
                 run.appendOutput(`Completed ${test.id}\r\n`);
             }
@@ -114,7 +114,7 @@ export function activate(context: vscode.ExtensionContext) {
             run.end();
         };
 
-        run.coverageProvider = {
+        /*run.coverageProvider = {
             provideFileCoverage() {
                 const coverage: vscode.FileCoverage[] = [];
                 for (const [uri, statements] of coveredLines) {
@@ -130,7 +130,7 @@ export function activate(context: vscode.ExtensionContext) {
 
                 return coverage;
             },
-        };
+        };*/
 
         discoverTests(request.include ?? gatherTestItems(ctrl.items)).then(
             runTestQueue
@@ -150,8 +150,8 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.TestRunProfileKind.Run,
         runHandler,
         true,
-        undefined,
-        true
+        undefined
+        //true
     );
 
     ctrl.resolveHandler = async (item) => {
