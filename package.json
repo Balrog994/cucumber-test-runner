@@ -47,6 +47,7 @@
     "dependencies": {
         "@cucumber/cucumber": "^8.10.0",
         "@cucumber/gherkin": "^26.0.3",
-        "@cucumber/messages": "^21.0.1"
+        "@cucumber/messages": "^21.0.1",
+        "@rauschma/stringio": "^1.4.0"
     }
 }

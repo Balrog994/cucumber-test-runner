@@ -1,32 +1,21 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from "vscode";
-import {
-    getContentFromFilesystem,
-    TestCase,
-    testData,
-    TestFile,
-} from "./testTree";
+import { getContentFromFilesystem, TestCase, testData, TestFile } from "./testTree";
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
-    const ctrl = vscode.tests.createTestController(
-        "cucumberTestRunnerTests",
-        "Cucumber Tests"
-    );
+    const ctrl = vscode.tests.createTestController("cucumberTestRunnerTests", "Cucumber Tests");
     context.subscriptions.push(ctrl);
 
     const channel = vscode.window.createOutputChannel("Cucumber Test Runner");
     context.subscriptions.push(channel);
 
     const fileChangedEmitter = new vscode.EventEmitter<vscode.Uri>();
-    const runHandler = (
-        request: vscode.TestRunRequest,
-        cancellation: vscode.CancellationToken
-    ) => {
+    const runHandler = (request: vscode.TestRunRequest, cancellation: vscode.CancellationToken) => {
         //if (!request.continuous) {
-        return startTestRun(request);
+        return startTestRun(request, false);
         //}
 
         /*const l = fileChangedEmitter.event((uri) =>
@@ -42,7 +31,11 @@ export function activate(context: vscode.ExtensionContext) {
         cancellation.onCancellationRequested(() => l.dispose());*/
     };
 
-    const startTestRun = (request: vscode.TestRunRequest) => {
+    const debugHandler = (request: vscode.TestRunRequest, cancellation: vscode.CancellationToken) => {
+        return startTestRun(request, true);
+    };
+
+    const startTestRun = (request: vscode.TestRunRequest, debug: boolean) => {
         const queue: { test: vscode.TestItem; data: TestCase }[] = [];
         const run = ctrl.createTestRun(request);
         // map of file uris to statements on each line:
@@ -99,7 +92,7 @@ export function activate(context: vscode.ExtensionContext) {
                     run.skipped(test);
                 } else {
                     run.started(test);
-                    await data.run(test, run);
+                    await data.runNew(test, run, debug);
                 }
 
                 /*const lineNo = test.range!.start.line;
@@ -132,17 +125,11 @@ export function activate(context: vscode.ExtensionContext) {
             },
         };*/
 
-        discoverTests(request.include ?? gatherTestItems(ctrl.items)).then(
-            runTestQueue
-        );
+        discoverTests(request.include ?? gatherTestItems(ctrl.items)).then(runTestQueue);
     };
 
     ctrl.refreshHandler = async () => {
-        await Promise.all(
-            getWorkspaceTestPatterns().map(({ pattern }) =>
-                findInitialFiles(ctrl, pattern)
-            )
-        );
+        await Promise.all(getWorkspaceTestPatterns().map(({ pattern }) => findInitialFiles(ctrl, pattern)));
     };
 
     ctrl.createRunProfile(
@@ -154,11 +141,18 @@ export function activate(context: vscode.ExtensionContext) {
         //true
     );
 
+    ctrl.createRunProfile(
+        "Debug Tests",
+        vscode.TestRunProfileKind.Debug,
+        debugHandler,
+        true,
+        undefined
+        //true
+    );
+
     ctrl.resolveHandler = async (item) => {
         if (!item) {
-            context.subscriptions.push(
-                ...startWatchingWorkspace(ctrl, fileChangedEmitter, channel)
-            );
+            context.subscriptions.push(...startWatchingWorkspace(ctrl, fileChangedEmitter, channel));
             return;
         }
 
@@ -191,9 +185,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
         vscode.workspace.onDidOpenTextDocument(updateNodeForDocument),
-        vscode.workspace.onDidChangeTextDocument((e) =>
-            updateNodeForDocument(e.document)
-        )
+        vscode.workspace.onDidChangeTextDocument((e) => updateNodeForDocument(e.document))
     );
 }
 
@@ -203,11 +195,7 @@ function getOrCreateFile(controller: vscode.TestController, uri: vscode.Uri) {
         return { file: existing, data: testData.get(existing) as TestFile };
     }
 
-    const file = controller.createTestItem(
-        uri.toString(),
-        uri.path.split("/").pop()!,
-        uri
-    );
+    const file = controller.createTestItem(uri.toString(), uri.path.split("/").pop()!, uri);
     controller.items.add(file);
 
     const data = new TestFile();
@@ -234,10 +222,7 @@ function getWorkspaceTestPatterns() {
     }));
 }
 
-async function findInitialFiles(
-    controller: vscode.TestController,
-    pattern: vscode.GlobPattern
-) {
+async function findInitialFiles(controller: vscode.TestController, pattern: vscode.GlobPattern) {
     for (const file of await vscode.workspace.findFiles(pattern)) {
         if (file.path.includes("node_modules")) {
             continue;
@@ -246,11 +231,7 @@ async function findInitialFiles(
     }
 }
 
-function startWatchingWorkspace(
-    controller: vscode.TestController,
-    fileChangedEmitter: vscode.EventEmitter<vscode.Uri>,
-    logChannel: vscode.OutputChannel
-) {
+function startWatchingWorkspace(controller: vscode.TestController, fileChangedEmitter: vscode.EventEmitter<vscode.Uri>, logChannel: vscode.OutputChannel) {
     return getWorkspaceTestPatterns().map(({ workspaceFolder, pattern }) => {
         const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 

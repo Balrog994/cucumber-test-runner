@@ -1,10 +1,9 @@
 import { TextDecoder } from "util";
 import * as vscode from "vscode";
 import { parseMarkdown } from "./parser";
-import { runCucumber, loadConfiguration, loadSources, loadSupport } from "@cucumber/cucumber/api";
-import { Cli } from "@cucumber/cucumber";
 import { spawn } from "child_process";
 import { GherkinDocument, TestStepFinished, TestStepResult, TestStepResultStatus, TestCase as TestCaseMessage, StepDefinition, Pickle } from "@cucumber/messages";
+import { chunksToLinesAsync } from "@rauschma/stringio";
 
 const textDecoder = new TextDecoder("utf-8");
 
@@ -98,8 +97,6 @@ export class TestHeading {
     constructor(public generation: number) {}
 }
 
-type Operator = "+" | "-" | "*" | "/";
-
 export class TestStep {
     constructor(private readonly name: string, private readonly logChannel: vscode.OutputChannel) {}
 
@@ -118,76 +115,6 @@ type CucumberOutput = {
     actual?: string[];
 };
 
-function parseCucumberOutput(output: string) {
-    const results: CucumberOutput[] = [];
-
-    const lines = output.split("\n");
-    const matchRegex = /^\s*(.) (.*) # (.*):(\d*)$/;
-
-    lines.forEach((line) => {
-        let scenario: CucumberOutput | undefined = undefined;
-        const match = line.match(matchRegex);
-        if (!match) {
-            return;
-        }
-
-        const checkSymbol = match[1];
-        const name = match[2];
-        const file = match[3];
-        const lineInFile = match[4];
-
-        if (checkSymbol === "√") {
-            scenario = {
-                status: "passed",
-                name: name,
-                file: file,
-                line: parseInt(lineInFile),
-            };
-        } else if (checkSymbol === "×") {
-            scenario = {
-                status: "failed",
-                name: name,
-                file: file,
-                line: parseInt(lineInFile),
-                expected: [],
-                actual: [],
-            };
-
-            let failureMessage = "";
-            let i = lines.indexOf(line) + 1;
-
-            if (lines[i].includes("AssertionError [ERR_ASSERTION]")) {
-                while (i < lines.length && lines[i].startsWith(" ")) {
-                    failureMessage += lines[i].trim() + "\n";
-                    i++;
-                }
-                scenario.failureMessage = failureMessage.trim();
-
-                while (i < lines.length) {
-                    if (lines[i].trim().startsWith("+")) {
-                        scenario.expected!.push(lines[i].trim().substring(1));
-                    } else if (lines[i].trim().startsWith("-")) {
-                        scenario.actual!.push(lines[i].trim().substring(1));
-                    }
-                    i++;
-                }
-            } else {
-                while (i < lines.length && lines[i].startsWith("       ")) {
-                    failureMessage += lines[i].trim() + "\n";
-                    i++;
-                }
-                scenario.failureMessage = failureMessage.trim();
-            }
-        }
-
-        if (scenario?.status) {
-            results.push(scenario);
-        }
-    });
-
-    return results;
-}
-
 export class TestCase {
     constructor(private readonly name: string, public generation: number, private logChannel: vscode.OutputChannel) {}
 
@@ -203,7 +130,161 @@ export class TestCase {
         return `${this.name}`;
     }
 
-    async run(item: vscode.TestItem, options: vscode.TestRun): Promise<void> {
+    async runNew(item: vscode.TestItem, options: vscode.TestRun, debug: boolean) {
+        const debugOptions = debug ? ["--inspect"] : [];
+        const cucumberProcess = spawn(
+            `node`,
+            [...debugOptions, "./node_modules/@cucumber/cucumber/bin/cucumber.js", "--name", item.label, item.uri!.fsPath, "--format", "message"],
+            {
+                cwd: vscode.workspace.workspaceFolders![0].uri.fsPath,
+                env: process.env,
+            }
+        );
+
+        if (debug) {
+            for await (const line of chunksToLinesAsync(cucumberProcess.stderr)) {
+                if (line.startsWith("Debugger listening on ws://")) {
+                    const url = line.substring("Debugger listening on ws://".length);
+                    if (url) {
+                        vscode.debug.startDebugging(vscode.workspace.workspaceFolders![0], {
+                            type: "node",
+                            request: "attach",
+                            name: "Attach to Cucumber",
+                            address: url,
+                            localRoot: "${workspaceFolder}",
+                            remoteRoot: "${workspaceFolder}",
+                            protocol: "inspector",
+                            skipFiles: ["<node_internals>/**"],
+                        });
+                    }
+                    break;
+                }
+            }
+        }
+
+        const stepIdToAstIds = new Map<string, string>();
+        let gherkinDocument: GherkinDocument | undefined = undefined;
+        let atLeastOneFailed = false;
+        let testCase: TestCaseMessage | undefined = undefined;
+        const children = Array.from(item.children).map((c) => c[1]);
+
+        for await (const line of chunksToLinesAsync(cucumberProcess.stdout)) {
+            const data = line.trim();
+
+            if (!data.startsWith("{")) {
+                if (data !== "") {
+                    this.logChannel.appendLine(`stdout: ${data}`);
+                }
+                continue;
+            }
+
+            const objectData = this.tryParseJson<any>(data);
+            if (!objectData) {
+                continue;
+            }
+
+            if (typeof objectData !== "object") {
+                continue;
+            }
+
+            if (objectData.hasOwnProperty("gherkinDocument")) {
+                gherkinDocument = objectData["gherkinDocument"] as GherkinDocument;
+            }
+
+            if (objectData.hasOwnProperty("testCase")) {
+                testCase = objectData["testCase"] as TestCaseMessage;
+            }
+
+            if (objectData.hasOwnProperty("pickle")) {
+                const pickle = objectData["pickle"] as Pickle;
+                pickle.steps.forEach((step) => {
+                    stepIdToAstIds.set(step.id, step.astNodeIds[0]);
+                });
+            }
+
+            if (objectData.hasOwnProperty("testStepFinished")) {
+                const testStepFinished = objectData["testStepFinished"] as TestStepFinished;
+                const stepId = testStepFinished.testStepId;
+
+                //Find step in testCase
+                const testStep = testCase?.testSteps.find((s) => s.id === stepId);
+                if (!testStep) {
+                    return;
+                }
+
+                //Find step in gherkinDocument
+                const stepAstId = stepIdToAstIds.get(testStep.pickleStepId!);
+                if (!stepAstId) {
+                    return;
+                }
+
+                const scenario = gherkinDocument?.feature!.children.find((scenario) => {
+                    if (!scenario.scenario) {
+                        return false;
+                    }
+                    return scenario.scenario.steps.some((step) => step.id === stepAstId);
+                });
+                if (!scenario) {
+                    return;
+                }
+
+                const stepInScenario = scenario.scenario!.steps.find((step) => step.id === stepAstId);
+                if (!stepInScenario) {
+                    return;
+                }
+
+                const step = children.find((step) => step.label === stepInScenario.keyword + stepInScenario.text);
+                if (!step) {
+                    return;
+                }
+
+                const stepResult = testStepFinished.testStepResult;
+
+                if (stepResult.status === TestStepResultStatus.PASSED) {
+                    //Convert nanoseconds to milliseconds
+                    options.passed(step, stepResult.duration.nanos / 1000000);
+                } else if (stepResult.status === TestStepResultStatus.FAILED) {
+                    if ((stepResult.message ?? "").startsWith("AssertionError [ERR_ASSERTION]")) {
+                        const lines = stepResult.message!.split("\n");
+                        const message = lines[0];
+                        const expected: string[] = [];
+                        const actual: string[] = [];
+
+                        if (lines[1] === "    + expected - actual") {
+                            for (let i = 3; i < lines.length; i++) {
+                                const line = lines[i].trim();
+                                if (line.startsWith("+")) {
+                                    expected.push(line.substring(1));
+                                } else if (line.startsWith("-")) {
+                                    actual.push(line.substring(1));
+                                }
+                            }
+
+                            options.failed(step, vscode.TestMessage.diff(message, expected.join("\n"), actual.join("\n")), stepResult.duration.nanos / 1000000);
+                        } else {
+                            options.failed(step, new vscode.TestMessage(message));
+                        }
+
+                        atLeastOneFailed = true;
+                    } else {
+                        options.failed(step, new vscode.TestMessage(stepResult.message ?? "Unknown error"));
+                    }
+                }
+            }
+
+            if (objectData.hasOwnProperty("testCaseFinished")) {
+                if (atLeastOneFailed) {
+                    options.failed(item, new vscode.TestMessage("One or more steps failed"));
+                } else {
+                    options.passed(item);
+                }
+            }
+        }
+
+        return { success: cucumberProcess.exitCode === 0 };
+    }
+
+    async run(item: vscode.TestItem, options: vscode.TestRun, debug: boolean): Promise<void> {
         const start = Date.now();
         const failures: CucumberOutput[] = [];
         const failureMessages: string[] = [];
@@ -220,10 +301,17 @@ export class TestCase {
                 this.logChannel.appendLine(`current path ${vscode.workspace.workspaceFolders![0].uri.fsPath}`);
                 this.logChannel.appendLine(`running node_modules/.bin/cucumber-js.cmd --name "^${item.label}$" ${item.uri!.fsPath}`);
 
-                const cucumberProcess = spawn(`node`, ["./node_modules/@cucumber/cucumber/bin/cucumber.js", "--name", item.label, item.uri!.fsPath, "--format", "message"], {
-                    cwd: vscode.workspace.workspaceFolders![0].uri.fsPath,
-                    env: process.env,
-                });
+                const debugOptions = debug ? ["--inspect"] : [];
+
+                const cucumberProcess = spawn(
+                    `node`,
+                    [...debugOptions, "./node_modules/@cucumber/cucumber/bin/cucumber.js", "--name", item.label, item.uri!.fsPath, "--format", "message"],
+                    {
+                        cwd: vscode.workspace.workspaceFolders![0].uri.fsPath,
+                        env: process.env,
+                    }
+                );
+
                 cucumberProcess.stdout.on("data", (dataBuffer: Buffer) => {
                     const dataString = dataBuffer.toString();
                     const dataLines = dataString.split("\n").map((l) => l.trim());
@@ -340,8 +428,25 @@ export class TestCase {
                         }*/
                     }
                 });
-                cucumberProcess.stderr.on("data", (data) => {
-                    this.logChannel.appendLine(`stderr: ${data}`);
+                cucumberProcess.stderr.on("data", (dataBuffer: Buffer) => {
+                    const dataString = dataBuffer.toString();
+                    this.logChannel.appendLine(`stderr: ${dataString}`);
+
+                    if (dataString.startsWith("Debugger listening on ws://") && debug) {
+                        //parse url and port
+                        const url = dataString.substring("Debugger listening on ws://".length);
+
+                        vscode.debug.startDebugging(vscode.workspace.workspaceFolders![0], {
+                            type: "node",
+                            request: "attach",
+                            name: "Attach to Cucumber",
+                            address: url,
+                            localRoot: "${workspaceFolder}",
+                            remoteRoot: "${workspaceFolder}",
+                            protocol: "inspector",
+                            skipFiles: ["<node_internals>/**"],
+                        });
+                    }
                 });
                 cucumberProcess.on("close", (code) => {
                     this.logChannel.appendLine("cucumber-js terminated");
@@ -350,46 +455,6 @@ export class TestCase {
             });
 
             const duration = Date.now() - start;
-
-            /*if (result.success) {
-                options.passed(item, duration);
-                item.children.forEach((child) =>
-                    options.passed(child, duration)
-                );
-            } else {
-                const msg = new vscode.TestMessage(failureMessages[0]);
-                msg.location = new vscode.Location(item.uri!, item.range!);
-                options.failed(item, msg, duration);
-
-                item.children.forEach((child) => {
-                    const failure = failures.filter(
-                        (f) => f.name === child.label
-                    )[0];
-                    if (!failure) {
-                        options.skipped(child);
-                        return;
-                    }
-
-                    if (failure && failure.status === "passed") {
-                        options.passed(child, duration);
-                    } else {
-                        options.failed(
-                            child,
-                            (failure.expected ?? []).length === 0 &&
-                                (failure.actual ?? []).length === 0
-                                ? new vscode.TestMessage(
-                                      failure.failureMessage ?? "Generic Error"
-                                  )
-                                : vscode.TestMessage.diff(
-                                      failure?.failureMessage ??
-                                          "Generic error",
-                                      (failure?.expected ?? []).join("\n"),
-                                      (failure?.actual ?? []).join("\n")
-                                  )
-                        );
-                    }
-                });
-            }*/
         } catch (e: any) {
             const duration = Date.now() - start;
 
@@ -397,39 +462,5 @@ export class TestCase {
             msg.location = new vscode.Location(item.uri!, item.range!);
             options.failed(item, msg, duration);
         }
-
-        /*const task = new vscode.Task(
-			{ type: 'cucumberjs', task: 'test' },
-			vscode.workspace.workspaceFolders![0],
-			'runCucumberTest',
-			'npx',
-			new vscode.ShellExecution(`npx cucumber-js ${this.file}:${this.line}`)
-		);*/
-
-        /*const start = Date.now();
-		await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
-		const actual = this.evaluate();
-		const duration = Date.now() - start;
-
-		if (actual === this.expected) {
-			options.passed(item, duration);
-		} else {
-			const message = vscode.TestMessage.diff(`Expected ${item.label}`, String(this.expected), String(actual));
-			message.location = new vscode.Location(item.uri!, item.range!);
-			options.failed(item, message, duration);
-		}*/
-    }
-
-    private evaluate() {
-        /*switch (this.operator) {
-			case '-':
-				return this.a - this.b;
-			case '+':
-				return this.a + this.b;
-			case '/':
-				return Math.floor(this.a / this.b);
-			case '*':
-				return this.a * this.b;
-		}*/
     }
 }
