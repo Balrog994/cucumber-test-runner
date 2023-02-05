@@ -1,14 +1,10 @@
 import { TextDecoder } from "util";
 import * as vscode from "vscode";
 import { parseMarkdown } from "./parser";
-import {
-    runCucumber,
-    loadConfiguration,
-    loadSources,
-    loadSupport,
-} from "@cucumber/cucumber/api";
+import { runCucumber, loadConfiguration, loadSources, loadSupport } from "@cucumber/cucumber/api";
 import { Cli } from "@cucumber/cucumber";
 import { spawn } from "child_process";
+import { GherkinDocument, TestStepFinished, TestStepResult, TestStepResultStatus, TestCase as TestCaseMessage, StepDefinition, Pickle } from "@cucumber/messages";
 
 const textDecoder = new TextDecoder("utf-8");
 
@@ -31,11 +27,7 @@ export const getContentFromFilesystem = async (uri: vscode.Uri) => {
 export class TestFile {
     public didResolve = false;
 
-    public async updateFromDisk(
-        controller: vscode.TestController,
-        item: vscode.TestItem,
-        logChannel: vscode.OutputChannel
-    ) {
+    public async updateFromDisk(controller: vscode.TestController, item: vscode.TestItem, logChannel: vscode.OutputChannel) {
         try {
             const content = await getContentFromFilesystem(item.uri!);
             item.error = undefined;
@@ -49,12 +41,7 @@ export class TestFile {
      * Parses the tests from the input text, and updates the tests contained
      * by this file to be those from the text,
      */
-    public updateFromContents(
-        controller: vscode.TestController,
-        content: string,
-        item: vscode.TestItem,
-        logChannel: vscode.OutputChannel
-    ) {
+    public updateFromContents(controller: vscode.TestController, content: string, item: vscode.TestItem, logChannel: vscode.OutputChannel) {
         const ancestors = [{ item, children: [] as vscode.TestItem[] }];
         const thisGeneration = generationCounter++;
         this.didResolve = true;
@@ -73,11 +60,7 @@ export class TestFile {
                 const data = new TestStep(name, logChannel);
                 const id = `${item.uri}/${scenario.label}/${data.getLabel()}`;
 
-                const tcase = controller.createTestItem(
-                    id,
-                    data.getLabel(),
-                    item.uri
-                );
+                const tcase = controller.createTestItem(id, data.getLabel(), item.uri);
                 testData.set(tcase, data);
                 tcase.range = range;
                 scenario.children.add(tcase);
@@ -88,11 +71,7 @@ export class TestFile {
                 const data = new TestCase(name, thisGeneration, logChannel);
                 const id = `${item.uri}/${data.getLabel()}`;
 
-                const tcase = controller.createTestItem(
-                    id,
-                    data.getLabel(),
-                    item.uri
-                );
+                const tcase = controller.createTestItem(id, data.getLabel(), item.uri);
                 testData.set(tcase, data);
                 tcase.range = range;
                 parent.children.push(tcase);
@@ -122,10 +101,7 @@ export class TestHeading {
 type Operator = "+" | "-" | "*" | "/";
 
 export class TestStep {
-    constructor(
-        private readonly name: string,
-        private readonly logChannel: vscode.OutputChannel
-    ) {}
+    constructor(private readonly name: string, private readonly logChannel: vscode.OutputChannel) {}
 
     getLabel() {
         return `${this.name}`;
@@ -213,11 +189,15 @@ function parseCucumberOutput(output: string) {
 }
 
 export class TestCase {
-    constructor(
-        private readonly name: string,
-        public generation: number,
-        private logChannel: vscode.OutputChannel
-    ) {}
+    constructor(private readonly name: string, public generation: number, private logChannel: vscode.OutputChannel) {}
+
+    private tryParseJson<T>(inputString: string): T | null {
+        try {
+            return JSON.parse(inputString);
+        } catch (e) {
+            return null;
+        }
+    }
 
     getLabel() {
         return `${this.name}`;
@@ -229,61 +209,149 @@ export class TestCase {
         const failureMessages: string[] = [];
 
         try {
-            const result = await new Promise<{ success: boolean }>(
-                (resolve, reject) => {
-                    let parseFailures = false;
+            const result = await new Promise<{ success: boolean }>((resolve, reject) => {
+                const stepsMap = new Map<string, vscode.TestItem>();
+                const stepIdToAstIds = new Map<string, string>();
+                let gherkinDocument: GherkinDocument | undefined = undefined;
+                let atLeastOneFailed = false;
+                let testCase: TestCaseMessage | undefined = undefined;
+                const children = Array.from(item.children).map((c) => c[1]);
 
-                    this.logChannel.appendLine(
-                        `current path ${
-                            vscode.workspace.workspaceFolders![0].uri.fsPath
-                        }`
-                    );
-                    this.logChannel.appendLine(
-                        `running node_modules/.bin/cucumber-js.cmd --name "^${
-                            item.label
-                        }$" ${item.uri!.fsPath}`
-                    );
+                this.logChannel.appendLine(`current path ${vscode.workspace.workspaceFolders![0].uri.fsPath}`);
+                this.logChannel.appendLine(`running node_modules/.bin/cucumber-js.cmd --name "^${item.label}$" ${item.uri!.fsPath}`);
 
-                    const cucumberProcess = spawn(
-                        `node`,
-                        [
-                            "./node_modules/@cucumber/cucumber/bin/cucumber.js",
-                            "--name",
-                            item.label,
-                            item.uri!.fsPath,
-                        ],
-                        {
-                            cwd: vscode.workspace.workspaceFolders![0].uri
-                                .fsPath,
-                            env: process.env,
+                const cucumberProcess = spawn(`node`, ["./node_modules/@cucumber/cucumber/bin/cucumber.js", "--name", item.label, item.uri!.fsPath, "--format", "message"], {
+                    cwd: vscode.workspace.workspaceFolders![0].uri.fsPath,
+                    env: process.env,
+                });
+                cucumberProcess.stdout.on("data", (dataBuffer: Buffer) => {
+                    const dataString = dataBuffer.toString();
+                    const dataLines = dataString.split("\n").map((l) => l.trim());
+
+                    for (const data of dataLines) {
+                        if (!data.startsWith("{")) {
+                            if (data !== "") {
+                                this.logChannel.appendLine(`stdout: ${data}`);
+                            }
+                            return;
                         }
-                    );
-                    cucumberProcess.stdout.on("data", (dataBuffer: Buffer) => {
-                        const data = dataBuffer.toString();
+                        //this.logChannel.appendLine(`stdout: ${data}`);
 
-                        if (data.startsWith("Failures:")) {
+                        const objectData = this.tryParseJson<any>(data);
+                        if (!objectData) {
+                            return;
+                        }
+
+                        if (typeof objectData === "object") {
+                            if (objectData.hasOwnProperty("gherkinDocument")) {
+                                gherkinDocument = objectData["gherkinDocument"] as GherkinDocument;
+                            }
+                            if (objectData.hasOwnProperty("testCase")) {
+                                testCase = objectData["testCase"] as TestCaseMessage;
+                            }
+                            if (objectData.hasOwnProperty("pickle")) {
+                                const pickle = objectData["pickle"] as Pickle;
+                                pickle.steps.forEach((step) => {
+                                    stepIdToAstIds.set(step.id, step.astNodeIds[0]);
+                                });
+                            }
+                            if (objectData.hasOwnProperty("testStepFinished")) {
+                                const testStepFinished = objectData["testStepFinished"] as TestStepFinished;
+                                const stepId = testStepFinished.testStepId;
+
+                                //Find step in testCase
+                                const testStep = testCase?.testSteps.find((s) => s.id === stepId);
+                                if (!testStep) {
+                                    return;
+                                }
+
+                                //Find step in gherkinDocument
+                                const stepAstId = stepIdToAstIds.get(testStep.pickleStepId!);
+                                if (!stepAstId) {
+                                    return;
+                                }
+
+                                const scenario = gherkinDocument?.feature!.children.find((scenario) => {
+                                    if (!scenario.scenario) {
+                                        return false;
+                                    }
+                                    return scenario.scenario.steps.some((step) => step.id === stepAstId);
+                                });
+                                if (!scenario) {
+                                    return;
+                                }
+
+                                const stepInScenario = scenario.scenario!.steps.find((step) => step.id === stepAstId);
+                                if (!stepInScenario) {
+                                    return;
+                                }
+
+                                const step = children.find((step) => step.label === stepInScenario.keyword + stepInScenario.text);
+                                if (!step) {
+                                    return;
+                                }
+
+                                const stepResult = testStepFinished.testStepResult;
+
+                                if (stepResult.status === TestStepResultStatus.PASSED) {
+                                    //Convert nanoseconds to milliseconds
+                                    options.passed(step, stepResult.duration.nanos / 1000000);
+                                } else if (stepResult.status === TestStepResultStatus.FAILED) {
+                                    if ((stepResult.message ?? "").startsWith("AssertionError [ERR_ASSERTION]")) {
+                                        const lines = stepResult.message!.split("\n");
+                                        const message = lines[0];
+                                        const expected: string[] = [];
+                                        const actual: string[] = [];
+
+                                        if (lines[1] === "    + expected - actual") {
+                                            for (let i = 3; i < lines.length; i++) {
+                                                const line = lines[i].trim();
+                                                if (line.startsWith("+")) {
+                                                    expected.push(line.substring(1));
+                                                } else if (line.startsWith("-")) {
+                                                    actual.push(line.substring(1));
+                                                }
+                                            }
+
+                                            options.failed(step, vscode.TestMessage.diff(message, expected.join("\n"), actual.join("\n")), stepResult.duration.nanos / 1000000);
+                                        } else {
+                                            options.failed(step, new vscode.TestMessage(message));
+                                        }
+
+                                        atLeastOneFailed = true;
+                                    }
+                                }
+                            }
+                            if (objectData.hasOwnProperty("testCaseFinished")) {
+                                if (atLeastOneFailed) {
+                                    options.failed(item, new vscode.TestMessage("One or more steps failed"));
+                                } else {
+                                    options.passed(item);
+                                }
+                            }
+                        }
+
+                        /*if (data.startsWith("Failures:")) {
                             parseFailures = true;
                         } else if (parseFailures) {
                             const parsed = parseCucumberOutput(data);
                             failures.push(...parsed);
                             failureMessages.push(data);
-                        }
-
-                        this.logChannel.appendLine(`stdout: ${data}`);
-                    });
-                    cucumberProcess.stderr.on("data", (data) => {
-                        this.logChannel.appendLine(`stderr: ${data}`);
-                    });
-                    cucumberProcess.on("close", (code) => {
-                        this.logChannel.appendLine("cucumber-js terminated");
-                        resolve({ success: code === 0 });
-                    });
-                }
-            );
+                        }*/
+                    }
+                });
+                cucumberProcess.stderr.on("data", (data) => {
+                    this.logChannel.appendLine(`stderr: ${data}`);
+                });
+                cucumberProcess.on("close", (code) => {
+                    this.logChannel.appendLine("cucumber-js terminated");
+                    resolve({ success: code === 0 });
+                });
+            });
 
             const duration = Date.now() - start;
 
-            if (result.success) {
+            /*if (result.success) {
                 options.passed(item, duration);
                 item.children.forEach((child) =>
                     options.passed(child, duration)
@@ -321,7 +389,7 @@ export class TestCase {
                         );
                     }
                 });
-            }
+            }*/
         } catch (e: any) {
             const duration = Date.now() - start;
 
