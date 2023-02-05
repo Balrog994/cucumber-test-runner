@@ -2,8 +2,9 @@
     "name": "cucumber-test-runner",
     "displayName": "CucumberJS Test Runner",
     "description": "Allow to discover, run and debug cucumber-js tests",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "publisher": "balrog994",
+    "icon": "docs/images/logo.png",
     "repository": {
         "type": "git",
         "url": "https://github.com/Balrog994/cucumber-test-runner"
