@@ -2,7 +2,7 @@ import { TextDecoder } from "util";
 import * as vscode from "vscode";
 import { parseMarkdown } from "./parser";
 import { spawn } from "child_process";
-import { GherkinDocument, TestStepFinished, TestStepResult, TestStepResultStatus, TestCase as TestCaseMessage, StepDefinition, Pickle } from "@cucumber/messages";
+import { GherkinDocument, TestStepFinished, TestStepResult, TestStepResultStatus, TestCase as TestCaseMessage, StepDefinition, Pickle, StepKeywordType } from "@cucumber/messages";
 import { chunksToLinesAsync } from "@rauschma/stringio";
 
 const textDecoder = new TextDecoder("utf-8");
@@ -73,6 +73,7 @@ export class TestFile {
                 const tcase = controller.createTestItem(id, data.getLabel(), item.uri);
                 testData.set(tcase, data);
                 tcase.range = range;
+                tcase.tags = [new vscode.TestTag("runnable")];
                 parent.children.push(tcase);
             },
 
@@ -131,6 +132,9 @@ export class TestCase {
     }
 
     async runNew(item: vscode.TestItem, options: vscode.TestRun, debug: boolean) {
+        options.started(item);
+        item.children.forEach((child) => options.started(child));
+
         const debugOptions = debug ? ["--inspect"] : [];
         const cucumberProcess = spawn(
             `node`,
@@ -167,6 +171,7 @@ export class TestCase {
         let atLeastOneFailed = false;
         let testCase: TestCaseMessage | undefined = undefined;
         const children = Array.from(item.children).map((c) => c[1]);
+        let phase = "before";
 
         for await (const line of chunksToLinesAsync(cucumberProcess.stdout)) {
             const data = line.trim();
@@ -209,13 +214,13 @@ export class TestCase {
                 //Find step in testCase
                 const testStep = testCase?.testSteps.find((s) => s.id === stepId);
                 if (!testStep) {
-                    return;
+                    continue;
                 }
 
                 //Find step in gherkinDocument
                 const stepAstId = stepIdToAstIds.get(testStep.pickleStepId!);
                 if (!stepAstId) {
-                    return;
+                    continue;
                 }
 
                 const scenario = gherkinDocument?.feature!.children.find((scenario) => {
@@ -225,22 +230,48 @@ export class TestCase {
                     return scenario.scenario.steps.some((step) => step.id === stepAstId);
                 });
                 if (!scenario) {
-                    return;
+                    continue;
                 }
 
                 const stepInScenario = scenario.scenario!.steps.find((step) => step.id === stepAstId);
                 if (!stepInScenario) {
-                    return;
+                    continue;
                 }
 
                 const step = children.find((step) => step.label === stepInScenario.keyword + stepInScenario.text);
                 if (!step) {
-                    return;
+                    continue;
+                }
+
+                switch (stepInScenario.keywordType) {
+                    case StepKeywordType.CONTEXT:
+                        phase = "context";
+                        break;
+                    case StepKeywordType.ACTION:
+                        phase = "action";
+                        break;
+                    case StepKeywordType.OUTCOME:
+                        phase = "outcome";
+                        break;
                 }
 
                 const stepResult = testStepFinished.testStepResult;
 
-                if (stepResult.status === TestStepResultStatus.PASSED) {
+                if (stepResult.status === TestStepResultStatus.UNDEFINED) {
+                    const msg = new vscode.TestMessage("Undefined. Implement with the following snippet:\n\n");
+
+                    if (stepInScenario.keywordType === StepKeywordType.CONTEXT || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "context")) {
+                        msg.message += `Given('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
+                    }
+                    if (stepInScenario.keywordType === StepKeywordType.ACTION || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "action")) {
+                        msg.message += `When('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
+                    }
+                    if (stepInScenario.keywordType === StepKeywordType.OUTCOME || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "outcome")) {
+                        msg.message += `Then('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
+                    }
+
+                    options.errored(step, msg, stepResult.duration.nanos / 1000000);
+                } else if (stepResult.status === TestStepResultStatus.PASSED) {
                     //Convert nanoseconds to milliseconds
                     options.passed(step, stepResult.duration.nanos / 1000000);
                 } else if (stepResult.status === TestStepResultStatus.FAILED) {
@@ -267,7 +298,19 @@ export class TestCase {
 
                         atLeastOneFailed = true;
                     } else {
-                        options.failed(step, new vscode.TestMessage(stepResult.message ?? "Unknown error"));
+                        const fixedNewLines = stepResult.message?.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n") ?? "";
+                        const firstRow = fixedNewLines.split("\r\n")[0];
+                        const rest = fixedNewLines.substring(firstRow?.length ?? 0);
+
+                        options.failed(step, new vscode.TestMessage(firstRow ?? "Unknown error"));
+                        options.appendOutput(
+                            rest ?? "",
+                            {
+                                range: step.range!,
+                                uri: step.uri!,
+                            },
+                            step
+                        );
                     }
                 }
             }

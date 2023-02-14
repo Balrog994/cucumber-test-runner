@@ -38,6 +38,7 @@ export function activate(context: vscode.ExtensionContext) {
     const startTestRun = (request: vscode.TestRunRequest, debug: boolean) => {
         const queue: { test: vscode.TestItem; data: TestCase }[] = [];
         const run = ctrl.createTestRun(request);
+
         // map of file uris to statements on each line:
         /*const coveredLines = new Map<
             string, // file uri
@@ -132,7 +133,7 @@ export function activate(context: vscode.ExtensionContext) {
         await Promise.all(getWorkspaceTestPatterns().map(({ pattern }) => findInitialFiles(ctrl, pattern)));
     };
 
-    ctrl.createRunProfile(
+    const runProfile = ctrl.createRunProfile(
         "Run Tests",
         vscode.TestRunProfileKind.Run,
         runHandler,
@@ -140,8 +141,9 @@ export function activate(context: vscode.ExtensionContext) {
         undefined
         //true
     );
+    runProfile.tag = new vscode.TestTag("runnable");
 
-    ctrl.createRunProfile(
+    const debugProfile = ctrl.createRunProfile(
         "Debug Tests",
         vscode.TestRunProfileKind.Debug,
         debugHandler,
@@ -149,6 +151,7 @@ export function activate(context: vscode.ExtensionContext) {
         undefined
         //true
     );
+    debugProfile.tag = new vscode.TestTag("runnable");
 
     ctrl.resolveHandler = async (item) => {
         if (!item) {
