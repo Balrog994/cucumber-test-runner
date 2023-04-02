@@ -3,8 +3,15 @@
 src/**
 .gitignore
 .yarnrc
+*.vsix
 vsc-extension-quickstart.md
 **/tsconfig.json
 **/.eslintrc.json
 **/*.map
 **/*.ts
+node_modules
+out/
+tsconfig.config
+.prettierrc
+.eslintrc.json
+*.off
