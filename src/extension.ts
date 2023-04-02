@@ -1,6 +1,7 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from "vscode";
+import { TestRunner } from "./testRunner";
 import { getContentFromFilesystem, TestCase, testData, TestFile } from "./testTree";
 
 // This method is called when your extension is activated
@@ -87,7 +88,14 @@ export function activate(context: vscode.ExtensionContext) {
         };
 
         const runTestQueue = async () => {
-            for (const { test, data } of queue) {
+            const runner = new TestRunner(channel);
+            await runner.run(
+                queue.map((q) => q.test),
+                run,
+                debug
+            );
+
+            /*for (const { test, data } of queue) {
                 run.appendOutput(`Running ${test.id}\r\n`);
                 if (run.token.isCancellationRequested) {
                     run.skipped(test);
@@ -96,14 +104,14 @@ export function activate(context: vscode.ExtensionContext) {
                     await data.runNew(test, run, debug);
                 }
 
-                /*const lineNo = test.range!.start.line;
-                const fileCoverage = coveredLines.get(test.uri!.toString());
-                if (fileCoverage) {
-                    fileCoverage[lineNo]!.executionCount++;
-                }*/
+                //const lineNo = test.range!.start.line;
+                //const fileCoverage = coveredLines.get(test.uri!.toString());
+                //if (fileCoverage) {
+                //    fileCoverage[lineNo]!.executionCount++;
+                //}
 
                 run.appendOutput(`Completed ${test.id}\r\n`);
-            }
+            }*/
 
             run.end();
         };
@@ -193,12 +201,21 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 function getOrCreateFile(controller: vscode.TestController, uri: vscode.Uri) {
-    const existing = controller.items.get(uri.toString());
+    let uriString = uri.toString();
+    vscode.workspace.workspaceFolders?.forEach((folder) => {
+        if (uriString.startsWith(folder.uri.toString())) {
+            uriString = uriString.replace(folder.uri.toString(), "");
+        }
+    });
+    //Remove / at the beginning
+    uriString = uriString.replace(/^\//, "");
+
+    const existing = controller.items.get(uriString);
     if (existing) {
         return { file: existing, data: testData.get(existing) as TestFile };
     }
 
-    const file = controller.createTestItem(uri.toString(), uri.path.split("/").pop()!, uri);
+    const file = controller.createTestItem(uriString, uri.path.split("/").pop()!, uri);
     controller.items.add(file);
 
     const data = new TestFile();
