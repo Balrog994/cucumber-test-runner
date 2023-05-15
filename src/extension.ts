@@ -266,7 +266,15 @@ function startWatchingWorkspace(controller: vscode.TestController, fileChangedEm
             }
             fileChangedEmitter.fire(uri);
         });
-        watcher.onDidDelete((uri) => controller.items.delete(uri.toString()));
+        watcher.onDidDelete((uri) => {
+            let key = uri.toString();
+            if (key.startsWith(workspaceFolder.uri.toString())) {
+                key = key.replace(workspaceFolder.uri.toString(), "");
+            }
+            key = key.replace(/^\//, "");
+
+            controller.items.delete(key);
+        });
 
         findInitialFiles(controller, pattern);
 
