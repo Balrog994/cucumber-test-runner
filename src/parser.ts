@@ -8,9 +8,9 @@ type ParserEvents = {
     onFeature(range: vscode.Range, name: string): void;
 };
 
-const parseChild = (child: FeatureChild & RuleChild, events: ParserEvents) => {
+const parseChild = (child: FeatureChild & RuleChild, events: ParserEvents, lineOverride?: number) => {
     if (child.scenario) {
-        parseScenario(child.scenario, events);
+        parseScenario(child.scenario, events, lineOverride);
     } else if (child.rule) {
         parseRule(child.rule, events);
     } else if (child.background) {
@@ -27,8 +27,10 @@ const parseFeature = (feature: Feature, events: ParserEvents) => {
     }
 };
 
-const parseScenario = (scenario: Scenario, events: ParserEvents) => {
-    const scenarioRange = new vscode.Range(scenario.location.line - 1, (scenario.location.column ?? 1) - 1, scenario.location.line - 1, 100);
+const parseScenario = (scenario: Scenario, events: ParserEvents, lineOverride?: number) => {
+    const line = lineOverride ?? scenario.location.line;
+
+    const scenarioRange = new vscode.Range(line - 1, (scenario.location.column ?? 1) - 1, line - 1, 100);
     events.onScenario(scenarioRange, scenario.name);
 
     for (const step of scenario.steps) {
@@ -39,7 +41,7 @@ const parseScenario = (scenario: Scenario, events: ParserEvents) => {
 
 const parseRule = (rule: Rule, events: ParserEvents) => {
     for (const child of rule.children) {
-        parseChild(child, events);
+        parseChild(child, events, rule.location.line);
     }
 };
 
