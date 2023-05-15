@@ -70,3 +70,31 @@ default:
     require: ["features/**/*.{js,ts}"]
     publishQuiet: true
 ```
+
+# Known Issues
+
+If you're using a `cucumber.js` file instead of `cucumber.yaml`, please define a profile named `default` that has all your configuration except the `paths` option.
+There is currently an issue with how `cucumber-cli` handles command line arguments.
+
+User the non-default profile to run your tests from the command line and the default profile will be used by the extension.
+In the future the extension will allow you to choose which profile to use to launch tests.
+
+Here is an example of a viable `cucumber.js` file:
+
+```javascript
+const common = {
+    require: ["features/**/*.{js,ts}"],
+    requireModule: ["ts-node/register"],
+    publishQuiet: true,
+};
+
+module.exports = {
+    default: {
+        ...common,
+    },
+    cli: {
+        ...common,
+        paths: ["features/**/*.feature"],
+    },
+};
+```
