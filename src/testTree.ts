@@ -62,7 +62,7 @@ export class TestFile {
                 scenario.children.add(tcase);
             },
 
-            onScenario: (range, name) => {
+            onScenario: (range, name, tags) => {
                 const parent = ancestors[ancestors.length - 1];
                 const data = new TestCase(name, thisGeneration, logChannel);
                 const id = `${item.id}/${range.start.line}`;
@@ -70,18 +70,18 @@ export class TestFile {
                 const tcase = controller.createTestItem(id, data.getLabel(), item.uri);
                 testData.set(tcase, data);
                 tcase.range = range;
-                tcase.tags = [new vscode.TestTag("runnable")];
+                tcase.tags = [new vscode.TestTag("runnable")].concat(tags.map((t) => new vscode.TestTag(t.name)));
                 parent.children.push(tcase);
             },
 
-            onFeature: (range, name) => {
+            onFeature: (range, name, tags) => {
                 //ascend(depth);
                 const parent = ancestors[ancestors.length - 1];
                 const id = `${item.id}:${range.start.line}`;
 
                 const thead = controller.createTestItem(id, name, item.uri);
                 thead.range = range;
-                thead.tags = [new vscode.TestTag("runnable")];
+                thead.tags = [new vscode.TestTag("runnable")].concat(tags.map((t) => new vscode.TestTag(t.name)));
                 testData.set(thead, new TestHeading(thisGeneration));
                 parent.children.push(thead);
                 ancestors.push({ item: thead, children: [] });

@@ -1,11 +1,11 @@
 import * as vscode from "vscode";
 import { AstBuilder, GherkinClassicTokenMatcher, Parser } from "@cucumber/gherkin";
-import { Feature, FeatureChild, IdGenerator, Rule, RuleChild, Scenario } from "@cucumber/messages";
+import { Feature, FeatureChild, IdGenerator, Rule, RuleChild, Scenario, Tag } from "@cucumber/messages";
 
 type ParserEvents = {
     onStep(range: vscode.Range, name: string): void;
-    onScenario(range: vscode.Range, name: string): void;
-    onFeature(range: vscode.Range, name: string): void;
+    onScenario(range: vscode.Range, name: string, tags: readonly Tag[]): void;
+    onFeature(range: vscode.Range, name: string, tags: readonly Tag[]): void;
 };
 
 const parseChild = (child: FeatureChild & RuleChild, events: ParserEvents, lineOverride?: number) => {
@@ -20,7 +20,7 @@ const parseChild = (child: FeatureChild & RuleChild, events: ParserEvents, lineO
 
 const parseFeature = (feature: Feature, events: ParserEvents) => {
     const featureRange = new vscode.Range(feature.location.line - 1, (feature.location.column ?? 1) - 1, feature.location.line - 1, 100);
-    events.onFeature(featureRange, feature.name);
+    events.onFeature(featureRange, feature.name, feature.tags);
 
     for (const child of feature.children) {
         parseChild(child, events);
@@ -31,7 +31,7 @@ const parseScenario = (scenario: Scenario, events: ParserEvents, lineOverride?: 
     const line = lineOverride ?? scenario.location.line;
 
     const scenarioRange = new vscode.Range(line - 1, (scenario.location.column ?? 1) - 1, line - 1, 100);
-    events.onScenario(scenarioRange, scenario.name);
+    events.onScenario(scenarioRange, scenario.name, scenario.tags);
 
     for (const step of scenario.steps) {
         const stepRange = new vscode.Range(step.location.line - 1, (step.location.column ?? 1) - 1, step.location.line - 1, 100);
