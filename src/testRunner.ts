@@ -145,12 +145,16 @@ export class TestRunner {
 
         this.logChannel.appendLine(`Running cucumber-cli...`);
         this.logChannel.appendLine(`Working Directory: ${workspace.uri.fsPath}`);
-        this.logChannel.appendLine(`node ./node_modules/@cucumber/cucumber/bin/cucumber.js ${itemsOptions.join(" ")} --format message`);
 
+        const profile = adapterConfig.get<string>("profile");
         const debugOptions = debug ? ["--inspect=9230"] : [];
+        const profileOptions = profile !== undefined ? ["--profile", profile] : [];
+
+        this.logChannel.appendLine(`node ./node_modules/@cucumber/cucumber/bin/cucumber.js ${itemsOptions.join(" ")} --format message ${profileOptions.join(" ")}`);
+
         const cucumberProcess = spawn(
             `node`,
-            [...debugOptions, `${workspace.uri.fsPath}/node_modules/@cucumber/cucumber/bin/cucumber.js`, ...itemsOptions, "--format", "message"],
+            [...debugOptions, `${workspace.uri.fsPath}/node_modules/@cucumber/cucumber/bin/cucumber.js`, ...itemsOptions, "--format", "message", ...profileOptions],
             {
                 cwd: workspace.uri.fsPath,
                 env: env,

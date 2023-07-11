@@ -8,7 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.0]
 
 -   Added support for tags filtering in the test runner tree [Thanks to psethwick]
--   Added a new setting "cucumberTestRunner.env" to allow the users to specify custom environmente variables to run the tests
+-   Added a new setting "cucumberTestRunner.env" to allow the users to specify custom environment variables to run the tests [Thanks to hardymj]
+-   Added a new setting "cucumberTestRunner.profile" to allow the users to select a cucumber-js profile to run the tests
 
 ## [0.4.1]
 

@@ -44,9 +44,13 @@ You can even debug your tests directly from the Test Runner UI, just click the `
 
 ---
 
+### Search by @Tags
+
 We support searching and filtering tests by @Tag (Thanks to psethwick)
 
 ![](./docs/images/tags.png)
+
+### Override environment variables
 
 Now you can specify environment variables in your `settings.json` file, so that when you run your tests those variables will be defined.
 
@@ -56,6 +60,34 @@ Now you can specify environment variables in your `settings.json` file, so that 
         "MY_VARIABLE_1": "foo",
         "MY_VARIABLE_2": "bar"
     }
+}
+```
+
+### Custom cucumber profile
+
+Now you can select a profile to run the tests
+
+```javascript
+const common = {
+    require: ["features/**/*.{js,ts}"],
+    requireModule: ["ts-node/register"],
+    publishQuiet: true,
+};
+
+module.exports = {
+    default: {
+        ...common,
+        paths: ["features/**/*.feature"],
+    },
+    customProfile: {
+        ...common,
+    },
+};
+```
+
+```json
+{
+    "cucumberTestRunner.profile": "customProfile"
 }
 ```
 
@@ -92,28 +124,4 @@ default:
 
 # Known Issues
 
-If you're using a `cucumber.js` file instead of `cucumber.yaml`, please define a profile named `default` that has all your configuration except the `paths` option.
-There is currently an issue with how `cucumber-cli` handles command line arguments.
-
-User the non-default profile to run your tests from the command line and the default profile will be used by the extension.
-In the future the extension will allow you to choose which profile to use to launch tests.
-
-Here is an example of a viable `cucumber.js` file:
-
-```javascript
-const common = {
-    require: ["features/**/*.{js,ts}"],
-    requireModule: ["ts-node/register"],
-    publishQuiet: true,
-};
-
-module.exports = {
-    default: {
-        ...common,
-    },
-    cli: {
-        ...common,
-        paths: ["features/**/*.feature"],
-    },
-};
-```
+-   At the moment you cannot undefine an existing environment variable, the only thing you can do is set the variable to an empty string.
