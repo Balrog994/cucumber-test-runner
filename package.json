@@ -2,7 +2,7 @@
     "name": "cucumber-test-runner",
     "displayName": "CucumberJS Test Runner",
     "description": "Allow to discover, run and debug cucumber-js tests",
-    "version": "0.4.3",
+    "version": "0.5.0",
     "publisher": "balrog994",
     "license": "MIT",
     "icon": "docs/images/logo.png",
@@ -26,7 +26,22 @@
     ],
     "main": "./dist/main.js",
     "contributes": {
-        "commands": []
+        "commands": [],
+        "configuration": {
+            "title": "Cucumber Test Runner",
+            "properties": {
+                "cucumberTestRunner.env": {
+                    "type": "object",
+                    "default": {},
+                    "description": "An object defining environment variables to be used while running tests"
+                },
+                "cucumberTestRunner.profile": {
+                    "type": "string",
+                    "default": "",
+                    "description": "The name of the cucumber-js configuration profile to use to run tests"
+                }
+            }
+        }
     },
     "scripts": {
         "vscode:prepublish": "npm run esbuild-base -- --minify",

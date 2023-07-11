@@ -126,31 +126,33 @@ export class TestRunner {
         this.testCaseStartedToTestCase.clear();
         this.testCaseErrors.clear();
 
+        const workspace = vscode.workspace.workspaceFolders![0];
+
         const itemsOptions = items.map((item) => item.uri!.fsPath + ":" + (item.range!.start.line + 1));
-        const adapterConfig = vscode.workspace.getConfiguration('cucumberExplorer', vscode.workspace.workspaceFolders![0].uri);
+        const adapterConfig = vscode.workspace.getConfiguration("cucumberTestRunner", workspace.uri);
         const processEnv = process.env;
-      
-		    const configEnv: { [prop: string]: any } = adapterConfig.get('env') || {};
+
+        const configEnv = adapterConfig.get<{ [prop: string]: any }>("env") ?? {};
         const env = { ...processEnv };
         for (const prop in configEnv) {
-			      const val = configEnv[prop];
-			      if ((val === undefined) || (val === null)) {
-				        delete env.prop;
-			      } else {
-				        env[prop] = String(val);
-			      }
-		    }
+            const val = configEnv[prop];
+            if (val === undefined || val === null) {
+                delete env[prop];
+            } else {
+                env[prop] = String(val);
+            }
+        }
 
         this.logChannel.appendLine(`Running cucumber-cli...`);
-        this.logChannel.appendLine(`Working Directory: ${vscode.workspace.workspaceFolders![0].uri.fsPath}`);
+        this.logChannel.appendLine(`Working Directory: ${workspace.uri.fsPath}`);
         this.logChannel.appendLine(`node ./node_modules/@cucumber/cucumber/bin/cucumber.js ${itemsOptions.join(" ")} --format message`);
 
         const debugOptions = debug ? ["--inspect=9230"] : [];
         const cucumberProcess = spawn(
             `node`,
-            [...debugOptions, `${vscode.workspace.workspaceFolders![0].uri.fsPath}/node_modules/@cucumber/cucumber/bin/cucumber.js`, ...itemsOptions, "--format", "message"],
+            [...debugOptions, `${workspace.uri.fsPath}/node_modules/@cucumber/cucumber/bin/cucumber.js`, ...itemsOptions, "--format", "message"],
             {
-                cwd: vscode.workspace.workspaceFolders![0].uri.fsPath,
+                cwd: workspace.uri.fsPath,
                 env: env,
             }
         );
@@ -162,7 +164,7 @@ export class TestRunner {
                 if (line.startsWith("Debugger listening on ws://")) {
                     const url = line.substring("Debugger listening on ws://".length);
                     if (url) {
-                        vscode.debug.startDebugging(vscode.workspace.workspaceFolders![0], {
+                        vscode.debug.startDebugging(workspace, {
                             type: "node",
                             request: "attach",
                             name: "Attach to Cucumber",
