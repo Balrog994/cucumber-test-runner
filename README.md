@@ -50,6 +50,15 @@ We support searching and filtering tests by @Tag (Thanks to psethwick)
 
 Now you can specify environment variables in your `settings.json` file, so that when you run your tests those variables will be defined.
 
+```json
+{
+    "cucumberTestRunner.env": {
+        "MY_VARIABLE_1": "foo",
+        "MY_VARIABLE_2": "bar"
+    }
+}
+```
+
 # Prerequisites
 
 You need to have a working `cucumber-js` installation in your working folder and a proper cucumber configuration file.
