@@ -50,38 +50,45 @@ export class TestFile {
         };
 
         parseMarkdown(content, {
-            onStep: (range, name) => {
+            onStep: (range, name, tags) => {
                 const parent = ancestors[ancestors.length - 1];
                 const scenario = parent.children[parent.children.length - 1];
                 const data = new TestStep(name, logChannel);
                 const id = `${scenario.id}/${range.start.line}`;
 
+                const additionalTags = tags.map((t) => new vscode.TestTag(t.name.substring(1)));
+
                 const tcase = controller.createTestItem(id, data.getLabel(), item.uri);
                 testData.set(tcase, data);
                 tcase.range = range;
+                tcase.tags = additionalTags;
                 scenario.children.add(tcase);
             },
 
-            onScenario: (range, name) => {
+            onScenario: (range, name, tags) => {
                 const parent = ancestors[ancestors.length - 1];
                 const data = new TestCase(name, thisGeneration, logChannel);
                 const id = `${item.id}/${range.start.line}`;
 
+                const additionalTags = tags.map((t) => new vscode.TestTag(t.name.substring(1)));
+
                 const tcase = controller.createTestItem(id, data.getLabel(), item.uri);
                 testData.set(tcase, data);
                 tcase.range = range;
-                tcase.tags = [new vscode.TestTag("runnable")];
+                tcase.tags = [new vscode.TestTag("runnable"), ...additionalTags];
                 parent.children.push(tcase);
             },
 
-            onFeature: (range, name) => {
+            onFeature: (range, name, tags) => {
                 //ascend(depth);
                 const parent = ancestors[ancestors.length - 1];
                 const id = `${item.id}:${range.start.line}`;
 
+                const additionalTags = tags.map((t) => new vscode.TestTag(t.name.substring(1)));
+
                 const thead = controller.createTestItem(id, name, item.uri);
                 thead.range = range;
-                thead.tags = [new vscode.TestTag("runnable")];
+                thead.tags = [new vscode.TestTag("runnable"), ...additionalTags];
                 testData.set(thead, new TestHeading(thisGeneration));
                 parent.children.push(thead);
                 ancestors.push({ item: thead, children: [] });

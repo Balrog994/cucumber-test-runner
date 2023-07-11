@@ -20,7 +20,7 @@ Semlessly integrates with Visual Studio Code new Test Runner showing all files i
 
 ---
 
-Now you can view which steps passed or failed directly in your `.feature` files, and with the help of the official Cubumer extension you can `ctrl+click` to navigate to your failing step.
+Now you can view which steps passed or failed directly in your `.feature` files, and with the help of the official Cucumber extension you can `ctrl+click` to navigate to your failing step.
 
 ![](./docs/images/feature.png)
 
@@ -39,6 +39,14 @@ After running the test you will see an inline report of the failing tests with e
 You can even debug your tests directly from the Test Runner UI, just click the `Debug Test` action on a Feature or a Scenario!
 
 ![](./docs/images/debug.png)
+
+## Search by test and tag
+
+---
+
+In version 0.5.0 we support searching and filtering tests by @Tag
+
+![](./docs/images/tags.png)
 
 # Prerequisites
 

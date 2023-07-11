@@ -129,22 +129,33 @@ export class TestRunner {
         const itemsOptions = items.map((item) => item.uri!.fsPath + ":" + (item.range!.start.line + 1));
         const adapterConfig = vscode.workspace.getConfiguration('cucumberExplorer', vscode.workspace.workspaceFolders![0].uri);
         const processEnv = process.env;
-		const configEnv: { [prop: string]: any } = adapterConfig.get('env') || {};
+      
+		    const configEnv: { [prop: string]: any } = adapterConfig.get('env') || {};
         const env = { ...processEnv };
         for (const prop in configEnv) {
-			const val = configEnv[prop];
-			if ((val === undefined) || (val === null)) {
-				delete env.prop;
-			} else {
-				env[prop] = String(val);
-			}
-		}
+			      const val = configEnv[prop];
+			      if ((val === undefined) || (val === null)) {
+				        delete env.prop;
+			      } else {
+				        env[prop] = String(val);
+			      }
+		    }
+
+        this.logChannel.appendLine(`Running cucumber-cli...`);
+        this.logChannel.appendLine(`Working Directory: ${vscode.workspace.workspaceFolders![0].uri.fsPath}`);
+        this.logChannel.appendLine(`node ./node_modules/@cucumber/cucumber/bin/cucumber.js ${itemsOptions.join(" ")} --format message`);
 
         const debugOptions = debug ? ["--inspect=9230"] : [];
-        const cucumberProcess = spawn(`node`, [...debugOptions, "./node_modules/@cucumber/cucumber/bin/cucumber.js", ...itemsOptions, "--format", "message"], {
-            cwd: vscode.workspace.workspaceFolders![0].uri.fsPath,
-            env: env,
-        });
+        const cucumberProcess = spawn(
+            `node`,
+            [...debugOptions, `${vscode.workspace.workspaceFolders![0].uri.fsPath}/node_modules/@cucumber/cucumber/bin/cucumber.js`, ...itemsOptions, "--format", "message"],
+            {
+                cwd: vscode.workspace.workspaceFolders![0].uri.fsPath,
+                env: env,
+            }
+        );
+
+        this.logChannel.appendLine(`${cucumberProcess.spawnfile}    ${cucumberProcess.spawnargs}`);
 
         if (debug) {
             for await (const line of chunksToLinesAsync(cucumberProcess.stderr)) {
@@ -177,6 +188,7 @@ export class TestRunner {
                 }
                 continue;
             }
+            this.logChannel.appendLine(`stdout: ${data}`);
 
             const objectData = this.tryParseJson<Envelope>(data);
             if (!objectData) {
