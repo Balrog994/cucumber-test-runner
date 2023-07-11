@@ -40,13 +40,15 @@ You can even debug your tests directly from the Test Runner UI, just click the `
 
 ![](./docs/images/debug.png)
 
-## Search by test and tag
+## New in version 0.5.0
 
 ---
 
-In version 0.5.0 we support searching and filtering tests by @Tag
+We support searching and filtering tests by @Tag (Thanks to psethwick)
 
 ![](./docs/images/tags.png)
+
+Now you can specify environment variables in your `settings.json` file, so that when you run your tests those variables will be defined.
 
 # Prerequisites
 
