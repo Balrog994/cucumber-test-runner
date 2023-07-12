@@ -91,6 +91,12 @@ module.exports = {
 }
 ```
 
+### Better Error detection and reporting
+
+Now the extension detects and reports errors in before and after hooks.
+If possible it reports a problem directly at the line where the error occurred in the source file.
+The support is still limited, stay tuned for the next updates.
+
 # Prerequisites
 
 You need to have a working `cucumber-js` installation in your working folder and a proper cucumber configuration file.

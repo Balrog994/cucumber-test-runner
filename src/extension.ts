@@ -4,6 +4,8 @@ import * as vscode from "vscode";
 import { TestRunner } from "./testRunner";
 import { getContentFromFilesystem, TestCase, testData, TestFile } from "./testTree";
 
+import "./errorHandlers/fluentAssertionsErrorHandler";
+
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
@@ -12,6 +14,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     const channel = vscode.window.createOutputChannel("Cucumber Test Runner");
     context.subscriptions.push(channel);
+
+    const errors = vscode.languages.createDiagnosticCollection("cucumberTestRunnerRuntimeErrors");
+    context.subscriptions.push(errors);
 
     const fileChangedEmitter = new vscode.EventEmitter<vscode.Uri>();
     const runHandler = (request: vscode.TestRunRequest, cancellation: vscode.CancellationToken) => {
@@ -39,6 +44,8 @@ export function activate(context: vscode.ExtensionContext) {
     const startTestRun = (request: vscode.TestRunRequest, debug: boolean) => {
         const queue: { test: vscode.TestItem; data: TestCase }[] = [];
         const run = ctrl.createTestRun(request);
+
+        errors.clear();
 
         // map of file uris to statements on each line:
         /*const coveredLines = new Map<
@@ -88,7 +95,7 @@ export function activate(context: vscode.ExtensionContext) {
         };
 
         const runTestQueue = async () => {
-            const runner = new TestRunner(channel);
+            const runner = new TestRunner(channel, errors);
             await runner.run(
                 queue.map((q) => q.test),
                 run,

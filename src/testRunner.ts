@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
 import { spawn } from "child_process";
 import { chunksToLinesAsync } from "@rauschma/stringio";
-import { TestStepResultStatus, TestCase as TestCaseMessage, StepDefinition, Pickle, StepKeywordType, Envelope, Hook, Feature, Step } from "@cucumber/messages";
+import { TestStepResultStatus, TestCase as TestCaseMessage, StepDefinition, Pickle, StepKeywordType, Envelope, Hook, Feature, Step, TestStepFinished } from "@cucumber/messages";
+import { handleError } from "./errorHandlers/testRunErrorHandler";
 
 type RunnerData = {
     uri: string;
@@ -15,12 +16,13 @@ type RunnerData = {
 export class TestRunner {
     private runnerData = new Map<string, RunnerData>();
     private picklesIndex = new Map<string, Pickle>();
+    private hooksIndex = new Map<string, Hook>();
     private testCaseIndex = new Map<string, TestCaseMessage>();
     private testCasePhase = new Map<string, "before" | "context" | "action" | "outcome">();
     private testCaseStartedToTestCase = new Map<string, TestCaseMessage>();
     private testCaseErrors = new Map<string, number>();
 
-    constructor(private logChannel: vscode.OutputChannel) {}
+    constructor(private logChannel: vscode.OutputChannel, private diagnosticCollection: vscode.DiagnosticCollection) {}
 
     private tryParseJson<T>(inputString: string): T | null {
         try {
@@ -100,6 +102,59 @@ export class TestRunner {
         };
     }
 
+    private getHandleHookStepFinished(items: vscode.TestItem[], stepFinished: TestStepFinished) {
+        const testCase = this.testCaseStartedToTestCase.get(stepFinished.testCaseStartedId);
+        if (!testCase) {
+            return {};
+        }
+
+        const pickle = this.picklesIndex.get(testCase!.pickleId)!;
+        if (!pickle) {
+            return {};
+        }
+
+        //Find step in testCase
+        const testStep = testCase?.testSteps.find((s) => s.id === stepFinished.testStepId);
+        if (!testStep) {
+            return {};
+        }
+
+        //Find hook by id
+        const hook = this.hooksIndex.get(testStep.hookId!);
+        if (!hook) {
+            return {};
+        }
+
+        const data = this.runnerData.get(this.fixUri(pickle.uri!));
+        if (!data) {
+            return {};
+        }
+
+        const stepAstId = pickle.astNodeIds[0];
+
+        const scenario = data.feature.children.find((scenario) => {
+            if (!scenario.scenario) {
+                return false;
+            }
+            return scenario.scenario.id === stepAstId;
+        });
+        if (!scenario) {
+            return {};
+        }
+
+        const featureExpectedId = `${data!.uri}/${scenario.scenario!.location.line - 1}`;
+        const feature = items.find((item) => item.id === featureExpectedId);
+        if (!feature) {
+            return {};
+        }
+
+        return {
+            feature,
+            testCase,
+            hook,
+        };
+    }
+
     private fixUri(uri: string) {
         return uri.replace(/\\/g, "/");
     }
@@ -121,6 +176,7 @@ export class TestRunner {
     async run(items: vscode.TestItem[], options: vscode.TestRun, debug: boolean) {
         this.runnerData.clear();
         this.picklesIndex.clear();
+        this.hooksIndex.clear();
         this.testCaseIndex.clear();
         this.testCasePhase.clear();
         this.testCaseStartedToTestCase.clear();
@@ -148,7 +204,7 @@ export class TestRunner {
 
         const profile = adapterConfig.get<string>("profile");
         const debugOptions = debug ? ["--inspect=9230"] : [];
-        const profileOptions = profile !== undefined ? ["--profile", profile] : [];
+        const profileOptions = profile !== undefined && profile !== "" ? ["--profile", profile] : [];
 
         this.logChannel.appendLine(`node ./node_modules/@cucumber/cucumber/bin/cucumber.js ${itemsOptions.join(" ")} --format message ${profileOptions.join(" ")}`);
 
@@ -230,8 +286,7 @@ export class TestRunner {
 
             if (objectData.hook) {
                 const hook = objectData.hook;
-                const data = this.runnerData.get(this.fixUri(hook.sourceReference.uri!));
-                data?.hooks.push(hook);
+                this.hooksIndex.set(hook.id, hook);
             }
 
             if (objectData.testRunStarted) {
@@ -261,12 +316,25 @@ export class TestRunner {
 
             if (objectData.testStepFinished) {
                 const testStepFinished = objectData.testStepFinished;
+                const stepResult = testStepFinished.testStepResult;
+
                 const { step, feature, stepInScenario, testCase } = this.getStepAndFeatureByTestCaseStartedId(
                     items,
                     testStepFinished.testStepId,
                     testStepFinished.testCaseStartedId
                 );
                 if (!step || !feature || !stepInScenario || !testCase) {
+                    const { feature, testCase, hook } = this.getHandleHookStepFinished(items, testStepFinished);
+                    if (!feature || !testCase || !hook) {
+                        continue;
+                    }
+
+                    const range = new vscode.Range(hook.sourceReference.location!.line, hook.sourceReference.location?.column ?? 0, hook.sourceReference.location!.line, 100);
+                    const fullUri = workspace.uri.toString() + "/" + this.fixUri(hook.sourceReference.uri!);
+                    handleError(stepResult, feature, fullUri, range, options, this.diagnosticCollection);
+
+                    let errorsCount = this.testCaseErrors.get(testCase.id) ?? 0;
+                    this.testCaseErrors.set(testCase.id, errorsCount + 1);
                     continue;
                 }
 
@@ -285,8 +353,6 @@ export class TestRunner {
                         this.testCasePhase.set(testCase.id, phase);
                         break;
                 }
-
-                const stepResult = testStepFinished.testStepResult;
 
                 if (stepResult.status === TestStepResultStatus.UNDEFINED) {
                     const msg = new vscode.TestMessage("Undefined. Implement with the following snippet:\n\n");
@@ -309,41 +375,7 @@ export class TestRunner {
                     //Convert nanoseconds to milliseconds
                     options.passed(step, stepResult.duration.nanos / 1000000);
                 } else if (stepResult.status === TestStepResultStatus.FAILED) {
-                    if ((stepResult.message ?? "").startsWith("AssertionError [ERR_ASSERTION]")) {
-                        const lines = stepResult.message!.split("\n");
-                        const message = lines[0];
-                        const expected: string[] = [];
-                        const actual: string[] = [];
-
-                        if (lines[1] === "    + expected - actual") {
-                            for (let i = 3; i < lines.length; i++) {
-                                const line = lines[i].trim();
-                                if (line.startsWith("+")) {
-                                    expected.push(line.substring(1));
-                                } else if (line.startsWith("-")) {
-                                    actual.push(line.substring(1));
-                                }
-                            }
-
-                            options.failed(step, vscode.TestMessage.diff(message, expected.join("\n"), actual.join("\n")), stepResult.duration.nanos / 1000000);
-                        } else {
-                            options.failed(step, new vscode.TestMessage(message));
-                        }
-                    } else {
-                        const fixedNewLines = stepResult.message?.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n") ?? "";
-                        const firstRow = fixedNewLines.split("\r\n")[0];
-                        const rest = fixedNewLines.substring(firstRow?.length ?? 0);
-
-                        options.failed(step, new vscode.TestMessage(firstRow ?? "Unknown error"));
-                        options.appendOutput(
-                            rest ?? "",
-                            {
-                                range: step.range!,
-                                uri: step.uri!,
-                            },
-                            step
-                        );
-                    }
+                    handleError(stepResult, step, step.uri!.toString(), step.range!, options, this.diagnosticCollection);
 
                     let errorsCount = this.testCaseErrors.get(testCase.id) ?? 0;
                     this.testCaseErrors.set(testCase.id, errorsCount + 1);
