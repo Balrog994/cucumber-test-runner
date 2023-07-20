@@ -329,6 +329,11 @@ export class TestRunner {
                         continue;
                     }
 
+                    // Don't send errors for passed steps!
+                    if (stepResult.status === "PASSED") {
+                        continue;
+                    }
+
                     const range = new vscode.Range(hook.sourceReference.location!.line, hook.sourceReference.location?.column ?? 0, hook.sourceReference.location!.line, 100);
                     const fullUri = workspace.uri.toString() + "/" + this.fixUri(hook.sourceReference.uri!);
                     handleError(stepResult, feature, fullUri, range, options, this.diagnosticCollection);

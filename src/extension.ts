@@ -96,11 +96,15 @@ export function activate(context: vscode.ExtensionContext) {
 
         const runTestQueue = async () => {
             const runner = new TestRunner(channel, errors);
-            await runner.run(
-                queue.map((q) => q.test),
-                run,
-                debug
-            );
+            try {
+                await runner.run(
+                    queue.map((q) => q.test),
+                    run,
+                    debug
+                );
+            } finally {
+                run.end();
+            }
 
             /*for (const { test, data } of queue) {
                 run.appendOutput(`Running ${test.id}\r\n`);
@@ -120,7 +124,6 @@ export function activate(context: vscode.ExtensionContext) {
                 run.appendOutput(`Completed ${test.id}\r\n`);
             }*/
 
-            run.end();
         };
 
         /*run.coverageProvider = {
@@ -136,7 +139,7 @@ export function activate(context: vscode.ExtensionContext) {
                         )
                     );
                 }
-
+ 
                 return coverage;
             },
         };*/
@@ -290,4 +293,4 @@ function startWatchingWorkspace(controller: vscode.TestController, fileChangedEm
 }
 
 // This method is called when your extension is deactivated
-export function deactivate() {}
+export function deactivate() { }
