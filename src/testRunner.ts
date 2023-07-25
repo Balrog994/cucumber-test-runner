@@ -331,7 +331,7 @@ export class TestRunner {
                     }
 
                     // Don't send errors for passed steps!
-                    if (stepResult.status === "PASSED") {
+                    if (stepResult.status === TestStepResultStatus.PASSED) {
                         continue;
                     }
 
