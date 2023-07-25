@@ -247,6 +247,7 @@ export class TestRunner {
             if (!data.startsWith("{")) {
                 if (data !== "") {
                     this.logChannel.appendLine(`stdout: ${data}`);
+                    vscode.debug.activeDebugConsole.appendLine(data);
                 }
                 continue;
             }
@@ -359,79 +360,86 @@ export class TestRunner {
                         break;
                 }
 
-                if (stepResult.status === TestStepResultStatus.UNDEFINED) {
-                    const msg = new vscode.TestMessage("Undefined. Implement with the following snippet:\n\n");
+                switch (stepResult.status) {
+                    case TestStepResultStatus.UNDEFINED: {
+                        const msg = new vscode.TestMessage("Undefined. Implement with the following snippet:\n\n");
 
-                    if (stepInScenario.keywordType === StepKeywordType.CONTEXT || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "context")) {
-                        msg.message += `Given('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
+                        if (stepInScenario.keywordType === StepKeywordType.CONTEXT || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "context")) {
+                            msg.message += `Given('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
+                        }
+                        if (stepInScenario.keywordType === StepKeywordType.ACTION || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "action")) {
+                            msg.message += `When('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
+                        }
+                        if (stepInScenario.keywordType === StepKeywordType.OUTCOME || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "outcome")) {
+                            msg.message += `Then('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
+                        }
+
+                        options.errored(step, msg, stepResult.duration.nanos / 1000000);
+
+                        let errorsCount = this.testCaseErrors.get(testCase.id) ?? 0;
+                        this.testCaseErrors.set(testCase.id, errorsCount + 1);
+                    } break;
+                    case TestStepResultStatus.PASSED: {
+                        //Convert nanoseconds to milliseconds
+                        options.passed(step, stepResult.duration.nanos / 1000000);
+                    } break;
+                    case TestStepResultStatus.FAILED: {
+                        handleError(stepResult, step, step.uri!.toString(), step.range!, options, this.diagnosticCollection);
+
+                        let errorsCount = this.testCaseErrors.get(testCase.id) ?? 0;
+                        this.testCaseErrors.set(testCase.id, errorsCount + 1);
+                    } break;
+                    default:
+                        throw new Error(`Unhandled step result: ${stepResult.status}`);
+                }
+
+                }
+
+                if (objectData.testCaseFinished) {
+                    const testCaseFinished = objectData.testCaseFinished;
+                    const testCase = this.testCaseStartedToTestCase.get(testCaseFinished.testCaseStartedId);
+                    if (!testCase) {
+                        continue;
                     }
-                    if (stepInScenario.keywordType === StepKeywordType.ACTION || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "action")) {
-                        msg.message += `When('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
+
+                    const pickle = this.picklesIndex.get(testCase.pickleId);
+                    if (!pickle) {
+                        continue;
                     }
-                    if (stepInScenario.keywordType === StepKeywordType.OUTCOME || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "outcome")) {
-                        msg.message += `Then('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
+
+                    const data = this.runnerData.get(this.fixUri(pickle.uri!));
+                    if (!data) {
+                        continue;
                     }
 
-                    options.errored(step, msg, stepResult.duration.nanos / 1000000);
+                    const scenarioId = pickle.astNodeIds[0];
+                    const scenario = data.feature.children.find((c) => {
+                        if (!c.scenario) {
+                            return false;
+                        }
+                        return c.scenario.id === scenarioId;
+                    });
+                    if (!scenario || !scenario.scenario) {
+                        continue;
+                    }
 
-                    let errorsCount = this.testCaseErrors.get(testCase.id) ?? 0;
-                    this.testCaseErrors.set(testCase.id, errorsCount + 1);
-                } else if (stepResult.status === TestStepResultStatus.PASSED) {
-                    //Convert nanoseconds to milliseconds
-                    options.passed(step, stepResult.duration.nanos / 1000000);
-                } else if (stepResult.status === TestStepResultStatus.FAILED) {
-                    handleError(stepResult, step, step.uri!.toString(), step.range!, options, this.diagnosticCollection);
+                    const featureExpectedId = `${data!.uri}/${scenario.scenario.location.line}`;
+                    const feature = items.find((i) => i.id === featureExpectedId);
+                    if (!feature) {
+                        continue;
+                    }
 
-                    let errorsCount = this.testCaseErrors.get(testCase.id) ?? 0;
-                    this.testCaseErrors.set(testCase.id, errorsCount + 1);
+                    const errors = this.testCaseErrors.get(testCase.id) ?? 0;
+                    if (errors > 0) {
+                        options.failed(feature, new vscode.TestMessage("One or more steps failed"));
+                    } else {
+                        options.passed(feature);
+                    }
+
+                    options.end();
                 }
             }
 
-            if (objectData.testCaseFinished) {
-                const testCaseFinished = objectData.testCaseFinished;
-                const testCase = this.testCaseStartedToTestCase.get(testCaseFinished.testCaseStartedId);
-                if (!testCase) {
-                    continue;
-                }
-
-                const pickle = this.picklesIndex.get(testCase.pickleId);
-                if (!pickle) {
-                    continue;
-                }
-
-                const data = this.runnerData.get(this.fixUri(pickle.uri!));
-                if (!data) {
-                    continue;
-                }
-
-                const scenarioId = pickle.astNodeIds[0];
-                const scenario = data.feature.children.find((c) => {
-                    if (!c.scenario) {
-                        return false;
-                    }
-                    return c.scenario.id === scenarioId;
-                });
-                if (!scenario || !scenario.scenario) {
-                    continue;
-                }
-
-                const featureExpectedId = `${data!.uri}/${scenario.scenario.location.line}`;
-                const feature = items.find((i) => i.id === featureExpectedId);
-                if (!feature) {
-                    continue;
-                }
-
-                const errors = this.testCaseErrors.get(testCase.id) ?? 0;
-                if (errors > 0) {
-                    options.failed(feature, new vscode.TestMessage("One or more steps failed"));
-                } else {
-                    options.passed(feature);
-                }
-
-                options.end();
-            }
+            return { success: cucumberProcess.exitCode === 0 };
         }
-
-        return { success: cucumberProcess.exitCode === 0 };
     }
-}
