@@ -22,7 +22,7 @@ export class TestRunner {
     private testCaseStartedToTestCase = new Map<string, TestCaseMessage>();
     private testCaseErrors = new Map<string, number>();
 
-    constructor(private logChannel: vscode.OutputChannel, private diagnosticCollection: vscode.DiagnosticCollection) {}
+    constructor(private logChannel: vscode.OutputChannel, private diagnosticCollection: vscode.DiagnosticCollection) { }
 
     private tryParseJson<T>(inputString: string): T | null {
         try {
@@ -247,6 +247,7 @@ export class TestRunner {
             if (!data.startsWith("{")) {
                 if (data !== "") {
                     this.logChannel.appendLine(`stdout: ${data}`);
+                    vscode.debug.activeDebugConsole.appendLine(data);
                 }
                 continue;
             }
@@ -329,6 +330,11 @@ export class TestRunner {
                         continue;
                     }
 
+                    // Don't send errors for passed steps!
+                    if (stepResult.status === TestStepResultStatus.PASSED) {
+                        continue;
+                    }
+
                     const range = new vscode.Range(hook.sourceReference.location!.line, hook.sourceReference.location?.column ?? 0, hook.sourceReference.location!.line, 100);
                     const fullUri = workspace.uri.toString() + "/" + this.fixUri(hook.sourceReference.uri!);
                     handleError(stepResult, feature, fullUri, range, options, this.diagnosticCollection);
@@ -354,32 +360,42 @@ export class TestRunner {
                         break;
                 }
 
-                if (stepResult.status === TestStepResultStatus.UNDEFINED) {
-                    const msg = new vscode.TestMessage("Undefined. Implement with the following snippet:\n\n");
+                switch (stepResult.status) {
+                    case TestStepResultStatus.UNDEFINED: {
+                        const msg = new vscode.TestMessage("Undefined. Implement with the following snippet:\n\n");
 
-                    if (stepInScenario.keywordType === StepKeywordType.CONTEXT || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "context")) {
-                        msg.message += `Given('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
-                    }
-                    if (stepInScenario.keywordType === StepKeywordType.ACTION || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "action")) {
-                        msg.message += `When('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
-                    }
-                    if (stepInScenario.keywordType === StepKeywordType.OUTCOME || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "outcome")) {
-                        msg.message += `Then('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
-                    }
+                        if (stepInScenario.keywordType === StepKeywordType.CONTEXT || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "context")) {
+                            msg.message += `Given('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
+                        }
+                        if (stepInScenario.keywordType === StepKeywordType.ACTION || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "action")) {
+                            msg.message += `When('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
+                        }
+                        if (stepInScenario.keywordType === StepKeywordType.OUTCOME || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "outcome")) {
+                            msg.message += `Then('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
+                        }
 
-                    options.errored(step, msg, stepResult.duration.nanos / 1000000);
+                        options.errored(step, msg, stepResult.duration.nanos / 1000000);
 
-                    let errorsCount = this.testCaseErrors.get(testCase.id) ?? 0;
-                    this.testCaseErrors.set(testCase.id, errorsCount + 1);
-                } else if (stepResult.status === TestStepResultStatus.PASSED) {
-                    //Convert nanoseconds to milliseconds
-                    options.passed(step, stepResult.duration.nanos / 1000000);
-                } else if (stepResult.status === TestStepResultStatus.FAILED) {
-                    handleError(stepResult, step, step.uri!.toString(), step.range!, options, this.diagnosticCollection);
+                        let errorsCount = this.testCaseErrors.get(testCase.id) ?? 0;
+                        this.testCaseErrors.set(testCase.id, errorsCount + 1);
+                    } break;
+                    case TestStepResultStatus.PASSED: {
+                        //Convert nanoseconds to milliseconds
+                        options.passed(step, stepResult.duration.nanos / 1000000);
+                    } break;
+                    case TestStepResultStatus.FAILED: {
+                        handleError(stepResult, step, step.uri!.toString(), step.range!, options, this.diagnosticCollection);
 
-                    let errorsCount = this.testCaseErrors.get(testCase.id) ?? 0;
-                    this.testCaseErrors.set(testCase.id, errorsCount + 1);
+                        let errorsCount = this.testCaseErrors.get(testCase.id) ?? 0;
+                        this.testCaseErrors.set(testCase.id, errorsCount + 1);
+                    } break;
+                    case TestStepResultStatus.SKIPPED: {
+                        options.skipped(step);
+                    } break;
+                    default:
+                        throw new Error(`Unhandled step result: ${stepResult.status}`);
                 }
+
             }
 
             if (objectData.testCaseFinished) {
