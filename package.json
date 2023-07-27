@@ -2,7 +2,7 @@
     "name": "cucumber-test-runner",
     "displayName": "CucumberJS Test Runner",
     "description": "Allow to discover, run and debug cucumber-js tests",
-    "version": "0.5.0",
+    "version": "0.5.1",
     "publisher": "balrog994",
     "license": "MIT",
     "icon": "docs/images/logo.png",

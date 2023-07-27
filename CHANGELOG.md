@@ -5,6 +5,12 @@ All notable changes to this extension will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1]
+
+-   Fixed an issue where a test will be stuck in waiting if a Before/After hook gave an exception [Thanks to orine]
+-   Fixed an issue where the runner tried to output errors even if the Before/After hook completed successfully [Thanks to orine]
+-   Now skipped tests should be correctly marked as Skipped in the Test Runner UI [Thanks to orine]
+
 ## [0.5.0]
 
 -   Added support for tags filtering in the test runner tree [Thanks to psethwick]
