@@ -389,11 +389,14 @@ export class TestRunner {
                         let errorsCount = this.testCaseErrors.get(testCase.id) ?? 0;
                         this.testCaseErrors.set(testCase.id, errorsCount + 1);
                     } break;
+                    case TestStepResultStatus.SKIPPED: {
+                        options.skipped(step);
+                    } break;
                     default:
                         throw new Error(`Unhandled step result: ${stepResult.status}`);
                 }
 
-                }
+            }
 
                 if (objectData.testCaseFinished) {
                     const testCaseFinished = objectData.testCaseFinished;
