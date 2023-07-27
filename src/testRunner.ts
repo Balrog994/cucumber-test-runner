@@ -22,7 +22,7 @@ export class TestRunner {
     private testCaseStartedToTestCase = new Map<string, TestCaseMessage>();
     private testCaseErrors = new Map<string, number>();
 
-    constructor(private logChannel: vscode.OutputChannel, private diagnosticCollection: vscode.DiagnosticCollection) {}
+    constructor(private logChannel: vscode.OutputChannel, private diagnosticCollection: vscode.DiagnosticCollection) { }
 
     private tryParseJson<T>(inputString: string): T | null {
         try {
@@ -398,51 +398,51 @@ export class TestRunner {
 
             }
 
-                if (objectData.testCaseFinished) {
-                    const testCaseFinished = objectData.testCaseFinished;
-                    const testCase = this.testCaseStartedToTestCase.get(testCaseFinished.testCaseStartedId);
-                    if (!testCase) {
-                        continue;
-                    }
-
-                    const pickle = this.picklesIndex.get(testCase.pickleId);
-                    if (!pickle) {
-                        continue;
-                    }
-
-                    const data = this.runnerData.get(this.fixUri(pickle.uri!));
-                    if (!data) {
-                        continue;
-                    }
-
-                    const scenarioId = pickle.astNodeIds[0];
-                    const scenario = data.feature.children.find((c) => {
-                        if (!c.scenario) {
-                            return false;
-                        }
-                        return c.scenario.id === scenarioId;
-                    });
-                    if (!scenario || !scenario.scenario) {
-                        continue;
-                    }
-
-                    const featureExpectedId = `${data!.uri}/${scenario.scenario.location.line}`;
-                    const feature = items.find((i) => i.id === featureExpectedId);
-                    if (!feature) {
-                        continue;
-                    }
-
-                    const errors = this.testCaseErrors.get(testCase.id) ?? 0;
-                    if (errors > 0) {
-                        options.failed(feature, new vscode.TestMessage("One or more steps failed"));
-                    } else {
-                        options.passed(feature);
-                    }
-
-                    options.end();
+            if (objectData.testCaseFinished) {
+                const testCaseFinished = objectData.testCaseFinished;
+                const testCase = this.testCaseStartedToTestCase.get(testCaseFinished.testCaseStartedId);
+                if (!testCase) {
+                    continue;
                 }
-            }
 
-            return { success: cucumberProcess.exitCode === 0 };
+                const pickle = this.picklesIndex.get(testCase.pickleId);
+                if (!pickle) {
+                    continue;
+                }
+
+                const data = this.runnerData.get(this.fixUri(pickle.uri!));
+                if (!data) {
+                    continue;
+                }
+
+                const scenarioId = pickle.astNodeIds[0];
+                const scenario = data.feature.children.find((c) => {
+                    if (!c.scenario) {
+                        return false;
+                    }
+                    return c.scenario.id === scenarioId;
+                });
+                if (!scenario || !scenario.scenario) {
+                    continue;
+                }
+
+                const featureExpectedId = `${data!.uri}/${scenario.scenario.location.line}`;
+                const feature = items.find((i) => i.id === featureExpectedId);
+                if (!feature) {
+                    continue;
+                }
+
+                const errors = this.testCaseErrors.get(testCase.id) ?? 0;
+                if (errors > 0) {
+                    options.failed(feature, new vscode.TestMessage("One or more steps failed"));
+                } else {
+                    options.passed(feature);
+                }
+
+                options.end();
+            }
         }
+
+        return { success: cucumberProcess.exitCode === 0 };
     }
+}
