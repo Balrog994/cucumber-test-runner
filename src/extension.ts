@@ -245,10 +245,12 @@ function getWorkspaceTestPatterns() {
     if (!vscode.workspace.workspaceFolders) {
         return [];
     }
-
+    const workspace = vscode.workspace.workspaceFolders![0];
+    const adapterConfig = vscode.workspace.getConfiguration("cucumberTestRunner", workspace.uri);
+    const featurePaths = adapterConfig.get<string>("featurePaths") ?? "**/*.feature";
     return vscode.workspace.workspaceFolders.map((workspaceFolder) => ({
         workspaceFolder,
-        pattern: new vscode.RelativePattern(workspaceFolder, "**/*.feature"),
+        pattern: new vscode.RelativePattern(workspaceFolder, featurePaths),
     }));
 }
 

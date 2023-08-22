@@ -2,7 +2,7 @@
     "name": "cucumber-test-runner",
     "displayName": "CucumberJS Test Runner",
     "description": "Allow to discover, run and debug cucumber-js tests",
-    "version": "0.5.1",
+    "version": "0.5.2",
     "publisher": "balrog994",
     "license": "MIT",
     "icon": "docs/images/logo.png",
@@ -39,6 +39,11 @@
                     "type": "string",
                     "default": "",
                     "description": "The name of the cucumber-js configuration profile to use to run tests"
+                },
+                "cucumberTestRunner.featurePaths": {
+                    "type": "string",
+                    "default": "**/*.feature",
+                    "description": "The path expression for feature files to use to discover tests"
                 }
             }
         }

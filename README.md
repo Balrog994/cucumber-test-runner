@@ -91,6 +91,17 @@ module.exports = {
 }
 ```
 
+### Specify Feature File Paths
+
+You can select which feature files you want to be used for test discovory
+The default is `**/*.feature`
+
+```json
+{
+    "cucumberTestRunner.featurePaths": "integration-tests/*.feature"
+}
+```
+
 ### Better Error detection and reporting
 
 Now the extension detects and reports errors in before and after hooks.
