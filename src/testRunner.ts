@@ -189,9 +189,7 @@ export class TestRunner {
 
         const profileOptions = this.getProfileOptions(adapterConfig);
 
-        const debugOptions = debug ? ["--inspect=9230"] : [];
-
-        this.logChannel.appendLine(`Spawning cucumber-js process: node ./node_modules/@cucumber/cucumber/bin/cucumber.js ${itemsOptions.join(" ")} --format message ${profileOptions.join(" ")}`);
+        const debugOptions = debug ? ["--inspect-brk=9229"] : [];
 
         const cucumberProcess = spawn(
             `node`,
@@ -208,7 +206,7 @@ export class TestRunner {
             await this.startDebuggingProcess(cucumberProcess, workspace);
         }
 
-        await Promise.all([this.logPipe(cucumberProcess.stdout, "stdout", items, options, workspace), this.logPipe(cucumberProcess.stderr, "stderr", items, options, workspace)]);
+        await Promise.all([this.logStdOutPipe(cucumberProcess.stdout, items, options, workspace), this.logStdErrPipe(cucumberProcess.stderr, items, options)]);
 
         this.logChannel.appendLine(`Process exited with code ${cucumberProcess.exitCode}`);
 
@@ -225,7 +223,38 @@ export class TestRunner {
         this.testCaseErrors.clear();
     }
 
-    private async logPipe(pipe: Readable, pipeName: string, items: vscode.TestItem[], options: vscode.TestRun, workspace: vscode.WorkspaceFolder) {
+    private async logStdErrPipe(pipe: Readable, items: vscode.TestItem[], options: vscode.TestRun) {
+        const stdErrorLines = await this.readLogsFromStdErr(pipe);
+        const errorMessages = this.createErrorMessagesFromStdErrorOutput(stdErrorLines);
+
+        for (const item of items) {
+            options.errored(item, errorMessages);
+        }
+    }
+
+    private async readLogsFromStdErr(pipe: Readable): Promise<string[]> {
+        const pipeName = "stderr";
+        const errorMessages = [];
+
+        for await (const line of chunksToLinesAsync(pipe)) {
+            const trimmedLine = line.trim();
+            this.logChannel.appendLine(`${pipeName}: ${trimmedLine}`);
+            errorMessages.push(trimmedLine);
+        }
+
+        return errorMessages;
+    }
+
+    createErrorMessagesFromStdErrorOutput(stdErrorLines: string[]): vscode.TestMessage[] {
+        const message = stdErrorLines.join("\n");
+        // Replace the first line with whitespace, as the first line starts only with "Error: " and, thus, no proper error message is displayed in feature file.
+        const messageWithWhitespace = message.replace("\n", " ");
+        
+        return [ new vscode.TestMessage(messageWithWhitespace) ];
+    }
+
+    private async logStdOutPipe(pipe: Readable, items: vscode.TestItem[], options: vscode.TestRun, workspace: vscode.WorkspaceFolder) {
+        const pipeName = "stdout";
         for await (const line of chunksToLinesAsync(pipe)) {
             const data = line.trim();
 

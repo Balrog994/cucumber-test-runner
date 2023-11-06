@@ -7,9 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- Setting to set the current working directory for cucumber.js in workspace settings
+- Added setting to set the current working directory for cucumber.js in workspace settings
+- Added Output of stderr to console runner and test messages.
 
 ## [0.5.1]
 
