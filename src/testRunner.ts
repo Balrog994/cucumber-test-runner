@@ -1,8 +1,10 @@
 import * as vscode from "vscode";
-import { spawn } from "child_process";
+import { ChildProcessWithoutNullStreams, spawn } from "child_process";
 import { chunksToLinesAsync } from "@rauschma/stringio";
 import { TestStepResultStatus, TestCase as TestCaseMessage, StepDefinition, Pickle, StepKeywordType, Envelope, Hook, Feature, Step, TestStepFinished } from "@cucumber/messages";
 import { handleError } from "./errorHandlers/testRunErrorHandler";
+import path = require("path");
+import { Readable } from "stream";
 
 type RunnerData = {
     uri: string;
@@ -22,7 +24,7 @@ export class TestRunner {
     private testCaseStartedToTestCase = new Map<string, TestCaseMessage>();
     private testCaseErrors = new Map<string, number>();
 
-    constructor(private logChannel: vscode.OutputChannel, private diagnosticCollection: vscode.DiagnosticCollection) { }
+    constructor(private logChannel: vscode.OutputChannel, private diagnosticCollection: vscode.DiagnosticCollection) {}
 
     private tryParseJson<T>(inputString: string): T | null {
         try {
@@ -174,6 +176,46 @@ export class TestRunner {
     }
 
     async run(items: vscode.TestItem[], options: vscode.TestRun, debug: boolean) {
+        this.clearPreviousTestResult();
+
+        const workspace = vscode.workspace.workspaceFolders![0];
+
+        const itemsOptions = items.map((item) => item.uri!.fsPath + ":" + (item.range!.start.line + 1));
+        const adapterConfig = vscode.workspace.getConfiguration("cucumberTestRunner", workspace.uri);
+        const env = this.getEnvironmentVariables(adapterConfig);
+
+        const cwd = this.getRunnerWorkingDirectory(workspace, adapterConfig);
+        this.logChannel.appendLine(`Working Directory: ${cwd}`);
+
+        const profileOptions = this.getProfileOptions(adapterConfig);
+
+        const debugOptions = debug ? ["--inspect-brk=9229"] : [];
+
+        const cucumberjsPath = path.normalize(path.join(workspace.uri.fsPath, "node_modules/@cucumber/cucumber/bin/cucumber.js"));
+
+        const cucumberProcess = spawn(
+            `node`,
+            [...debugOptions, `${cucumberjsPath}`, ...itemsOptions, "--format", "message", ...profileOptions],
+            {
+                cwd,
+                env,
+            }
+        );
+
+        this.logChannel.appendLine(`Started Process ${cucumberProcess.spawnfile}:    ${cucumberProcess.spawnargs}`);
+
+        if (debug) {
+            await this.startDebuggingProcess(cucumberProcess, workspace);
+        }
+
+        await Promise.all([this.logStdOutPipe(cucumberProcess.stdout, items, options, workspace), this.logStdErrPipe(cucumberProcess.stderr, items, options)]);
+
+        this.logChannel.appendLine(`Process exited with code ${cucumberProcess.exitCode}`);
+
+        return { success: cucumberProcess.exitCode === 0 };
+    }
+
+    private clearPreviousTestResult() {
         this.runnerData.clear();
         this.picklesIndex.clear();
         this.hooksIndex.clear();
@@ -181,77 +223,49 @@ export class TestRunner {
         this.testCasePhase.clear();
         this.testCaseStartedToTestCase.clear();
         this.testCaseErrors.clear();
+    }
 
-        const workspace = vscode.workspace.workspaceFolders![0];
+    private async logStdErrPipe(pipe: Readable, items: vscode.TestItem[], options: vscode.TestRun) {
+        const stdErrorLines = await this.readLogsFromStdErr(pipe);
+        const errorMessages = this.createErrorMessagesFromStdErrorOutput(stdErrorLines);
 
-        const itemsOptions = items.map((item) => item.uri!.fsPath + ":" + (item.range!.start.line + 1));
-        const adapterConfig = vscode.workspace.getConfiguration("cucumberTestRunner", workspace.uri);
-        const processEnv = process.env;
+        for (const item of items) {
+            options.errored(item, errorMessages);
+        }
+    }
 
-        const configEnv = adapterConfig.get<{ [prop: string]: any }>("env") ?? {};
-        const env = { ...processEnv };
-        for (const prop in configEnv) {
-            const val = configEnv[prop];
-            if (val === undefined || val === null) {
-                delete env[prop];
-            } else {
-                env[prop] = String(val);
-            }
+    private async readLogsFromStdErr(pipe: Readable): Promise<string[]> {
+        const pipeName = "stderr";
+        const errorMessages = [];
+
+        for await (const line of chunksToLinesAsync(pipe)) {
+            const trimmedLine = line.trim();
+            this.logChannel.appendLine(`${pipeName}: ${trimmedLine}`);
+            errorMessages.push(trimmedLine);
         }
 
-        this.logChannel.appendLine(`Running cucumber-cli...`);
-        this.logChannel.appendLine(`Working Directory: ${workspace.uri.fsPath}`);
+        return errorMessages;
+    }
 
-        const profile = adapterConfig.get<string>("profile");
-        const debugOptions = debug ? ["--inspect=9230"] : [];
-        const profileOptions = profile !== undefined && profile !== "" ? ["--profile", profile] : [];
+    createErrorMessagesFromStdErrorOutput(stdErrorLines: string[]): vscode.TestMessage[] {
+        const message = stdErrorLines.join("\n");
+        
+        return [ new vscode.TestMessage(message) ];
+    }
 
-        this.logChannel.appendLine(`node ./node_modules/@cucumber/cucumber/bin/cucumber.js ${itemsOptions.join(" ")} --format message ${profileOptions.join(" ")}`);
-
-        const cucumberProcess = spawn(
-            `node`,
-            [...debugOptions, `${workspace.uri.fsPath}/node_modules/@cucumber/cucumber/bin/cucumber.js`, ...itemsOptions, "--format", "message", ...profileOptions],
-            {
-                cwd: workspace.uri.fsPath,
-                env: env,
-            }
-        );
-
-        this.logChannel.appendLine(`${cucumberProcess.spawnfile}    ${cucumberProcess.spawnargs}`);
-
-        if (debug) {
-            for await (const line of chunksToLinesAsync(cucumberProcess.stderr)) {
-                if (line.startsWith("Debugger listening on ws://")) {
-                    const url = line.substring("Debugger listening on ws://".length);
-                    if (url) {
-                        vscode.debug.startDebugging(workspace, {
-                            type: "node",
-                            request: "attach",
-                            name: "Attach to Cucumber",
-                            address: url,
-                            localRoot: "${workspaceFolder}",
-                            remoteRoot: "${workspaceFolder}",
-                            protocol: "inspector",
-                            port: 9230,
-                            skipFiles: ["<node_internals>/**"],
-                        });
-                    }
-                    break;
-                }
-            }
-        }
-
-        for await (const line of chunksToLinesAsync(cucumberProcess.stdout)) {
+    private async logStdOutPipe(pipe: Readable, items: vscode.TestItem[], options: vscode.TestRun, workspace: vscode.WorkspaceFolder) {
+        const pipeName = "stdout";
+        for await (const line of chunksToLinesAsync(pipe)) {
             const data = line.trim();
 
             if (!data.startsWith("{")) {
                 if (data !== "") {
-                    this.logChannel.appendLine(`stdout: ${data}`);
+                    this.logChannel.appendLine(`${pipeName}: ${data}`);
                     vscode.debug.activeDebugConsole.appendLine(data);
                 }
                 continue;
             }
-            this.logChannel.appendLine(`stdout: ${data}`);
+            this.logChannel.appendLine(`${pipeName}: ${data}`);
 
             const objectData = this.tryParseJson<Envelope>(data);
             if (!objectData) {
@@ -361,41 +375,48 @@ export class TestRunner {
                 }
 
                 switch (stepResult.status) {
-                    case TestStepResultStatus.UNDEFINED: {
-                        const msg = new vscode.TestMessage("Undefined. Implement with the following snippet:\n\n");
+                    case TestStepResultStatus.UNDEFINED:
+                        {
+                            const msg = new vscode.TestMessage("Undefined. Implement with the following snippet:\n\n");
 
-                        if (stepInScenario.keywordType === StepKeywordType.CONTEXT || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "context")) {
-                            msg.message += `Given('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
+                            if (stepInScenario.keywordType === StepKeywordType.CONTEXT || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "context")) {
+                                msg.message += `Given('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
+                            }
+                            if (stepInScenario.keywordType === StepKeywordType.ACTION || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "action")) {
+                                msg.message += `When('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
+                            }
+                            if (stepInScenario.keywordType === StepKeywordType.OUTCOME || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "outcome")) {
+                                msg.message += `Then('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
+                            }
+
+                            options.errored(step, msg, stepResult.duration.nanos / 1000000);
+
+                            let errorsCount = this.testCaseErrors.get(testCase.id) ?? 0;
+                            this.testCaseErrors.set(testCase.id, errorsCount + 1);
                         }
-                        if (stepInScenario.keywordType === StepKeywordType.ACTION || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "action")) {
-                            msg.message += `When('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
+                        break;
+                    case TestStepResultStatus.PASSED:
+                        {
+                            //Convert nanoseconds to milliseconds
+                            options.passed(step, stepResult.duration.nanos / 1000000);
                         }
-                        if (stepInScenario.keywordType === StepKeywordType.OUTCOME || (stepInScenario.keywordType === StepKeywordType.CONJUNCTION && phase === "outcome")) {
-                            msg.message += `Then('${stepInScenario.text}', function () {\n  return 'pending';\n});`;
+                        break;
+                    case TestStepResultStatus.FAILED:
+                        {
+                            handleError(stepResult, step, step.uri!.toString(), step.range!, options, this.diagnosticCollection);
+
+                            let errorsCount = this.testCaseErrors.get(testCase.id) ?? 0;
+                            this.testCaseErrors.set(testCase.id, errorsCount + 1);
                         }
-
-                        options.errored(step, msg, stepResult.duration.nanos / 1000000);
-
-                        let errorsCount = this.testCaseErrors.get(testCase.id) ?? 0;
-                        this.testCaseErrors.set(testCase.id, errorsCount + 1);
-                    } break;
-                    case TestStepResultStatus.PASSED: {
-                        //Convert nanoseconds to milliseconds
-                        options.passed(step, stepResult.duration.nanos / 1000000);
-                    } break;
-                    case TestStepResultStatus.FAILED: {
-                        handleError(stepResult, step, step.uri!.toString(), step.range!, options, this.diagnosticCollection);
-
-                        let errorsCount = this.testCaseErrors.get(testCase.id) ?? 0;
-                        this.testCaseErrors.set(testCase.id, errorsCount + 1);
-                    } break;
-                    case TestStepResultStatus.SKIPPED: {
-                        options.skipped(step);
-                    } break;
+                        break;
+                    case TestStepResultStatus.SKIPPED:
+                        {
+                            options.skipped(step);
+                        }
+                        break;
                     default:
                         throw new Error(`Unhandled step result: ${stepResult.status}`);
                 }
-
             }
 
             if (objectData.testCaseFinished) {
@@ -442,7 +463,54 @@ export class TestRunner {
                 options.end();
             }
         }
+    }
 
-        return { success: cucumberProcess.exitCode === 0 };
+    private async startDebuggingProcess(cucumberProcess: ChildProcessWithoutNullStreams, workspace: vscode.WorkspaceFolder) {
+        for await (const line of chunksToLinesAsync(cucumberProcess.stderr)) {
+            if (line.startsWith("Debugger listening on ws://")) {
+                const url = line.substring("Debugger listening on ws://".length);
+                if (url) {
+                    vscode.debug.startDebugging(workspace, {
+                        type: "node",
+                        request: "attach",
+                        name: "Attach to Cucumber",
+                        address: url,
+                        localRoot: "${workspaceFolder}",
+                        remoteRoot: "${workspaceFolder}",
+                        protocol: "inspector",
+                        port: 9230,
+                        skipFiles: ["<node_internals>/**"],
+                    });
+                }
+                break;
+            }
+        }
+    }
+
+    private getEnvironmentVariables(adapterConfig: vscode.WorkspaceConfiguration) {
+        const processEnv = process.env;
+
+        const configEnv = adapterConfig.get<{ [prop: string]: any }>("env") ?? {};
+        const env = { ...processEnv };
+        for (const prop in configEnv) {
+            const val = configEnv[prop];
+            if (val === undefined || val === null) {
+                delete env[prop];
+            } else {
+                env[prop] = String(val);
+            }
+        }
+        return env;
+    }
+
+    private getProfileOptions(adapterConfig: vscode.WorkspaceConfiguration) {
+        const profile = adapterConfig.get<string>("profile");
+        const profileOptions = profile !== undefined && profile !== "" ? ["--profile", profile] : [];
+        return profileOptions;
+    }
+
+    private getRunnerWorkingDirectory(workspace: vscode.WorkspaceFolder, settings: vscode.WorkspaceConfiguration) {
+        const cwd = settings.get<string | undefined>("cwd");
+        return cwd ? path.normalize(path.join(workspace.uri.fsPath, cwd)) : workspace.uri.fsPath;
     }
 }
