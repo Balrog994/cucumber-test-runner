@@ -91,6 +91,31 @@ module.exports = {
 }
 ```
 
+### Set current working directory for runner
+
+If you have your cucumber tests nested in your development project you may want to specify the current working directory cucumber is running in:
+
+```tree
+├── src
+│   ... your source code
+├── specs
+│   ├── cucumber.yml
+│   ├── tsconfig.json
+│   ├── features
+│   ├── steps
+│   ├── ...
+└── .gitignore
+```
+
+You can set the current working directory to cucumber and still have the test explorer for your whole application:
+
+```json
+{
+    "cucumberTestRunner.cwd": "./specs"
+}
+```
+
+
 ### Better Error detection and reporting
 
 Now the extension detects and reports errors in before and after hooks.

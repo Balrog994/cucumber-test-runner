@@ -2,7 +2,7 @@
     "name": "cucumber-test-runner",
     "displayName": "CucumberJS Test Runner",
     "description": "Allow to discover, run and debug cucumber-js tests",
-    "version": "0.5.1",
+    "version": "0.6.0",
     "publisher": "balrog994",
     "license": "MIT",
     "icon": "docs/images/logo.png",
@@ -39,6 +39,11 @@
                     "type": "string",
                     "default": "",
                     "description": "The name of the cucumber-js configuration profile to use to run tests"
+                },
+                "cucumberTestRunner.cwd": {
+                    "type": "string",
+                    "default": null,
+                    "description": "The working directory to use when running tests. If not specified, the workspace root will be used"
                 }
             }
         }
