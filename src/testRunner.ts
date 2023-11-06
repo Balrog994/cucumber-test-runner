@@ -191,9 +191,11 @@ export class TestRunner {
 
         const debugOptions = debug ? ["--inspect-brk=9229"] : [];
 
+        const cucumberjsPath = path.normalize(path.join(workspace.uri.fsPath, "node_modules/@cucumber/cucumber/bin/cucumber.js"));
+
         const cucumberProcess = spawn(
             `node`,
-            [...debugOptions, `${workspace.uri.fsPath}/node_modules/@cucumber/cucumber/bin/cucumber.js`, ...itemsOptions, "--format", "message", ...profileOptions],
+            [...debugOptions, `${cucumberjsPath}`, ...itemsOptions, "--format", "message", ...profileOptions],
             {
                 cwd,
                 env,
@@ -247,10 +249,8 @@ export class TestRunner {
 
     createErrorMessagesFromStdErrorOutput(stdErrorLines: string[]): vscode.TestMessage[] {
         const message = stdErrorLines.join("\n");
-        // Replace the first line with whitespace, as the first line starts only with "Error: " and, thus, no proper error message is displayed in feature file.
-        const messageWithWhitespace = message.replace("\n", " ");
         
-        return [ new vscode.TestMessage(messageWithWhitespace) ];
+        return [ new vscode.TestMessage(message) ];
     }
 
     private async logStdOutPipe(pipe: Readable, items: vscode.TestItem[], options: vscode.TestRun, workspace: vscode.WorkspaceFolder) {
